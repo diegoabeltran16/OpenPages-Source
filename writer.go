@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"os"
 
-	"openpages-source/models"
+	"diegoabeltran16/OpenPages-Source/models"
 )
 
 // WriteJSONL crea (o sobrescribe) el archivo en 'path' y escribe

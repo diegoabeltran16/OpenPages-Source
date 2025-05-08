@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"os"
 
-	"openpages-source/models"
+	"diegoabeltran16/OpenPages-Source/models"
 )
 
 // ReadTiddlers abre y deserializa un archivo JSON exportado de TiddlyWiki.
