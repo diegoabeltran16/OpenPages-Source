@@ -1,0 +1,35 @@
+name: Go CI
+
+# Se ejecuta en cada push o PR a main (puedes ajustar rama)
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Chequear código
+        uses: actions/checkout@v3
+
+      - name: Instalar Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: Cache de módulos
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Descarga dependencias
+        run: go mod download
+
+      - name: Ejecutar tests
+        run: go test ./... -v
