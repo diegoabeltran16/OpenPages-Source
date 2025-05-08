@@ -10,7 +10,7 @@ import (
 	"reflect"
 	"testing"
 
-	"diegoabeltran16/OpenPages-Source/models"
+	"github.com/diegoabeltran16/OpenPages-Source/models"
 )
 
 func TestWriteJSONL_Success(t *testing.T) {

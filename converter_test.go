@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"testing"
 
-	"diegoabeltran16/OpenPages-Source/models"
+	"github.com/diegoabeltran16/OpenPages-Source/models"
 )
 
 // TestConvertToRecord verifica que ConvertToRecord mapea correctamente

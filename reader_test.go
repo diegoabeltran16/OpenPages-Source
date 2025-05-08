@@ -9,7 +9,7 @@ import (
 	"os"
 	"testing"
 
-	"diegoabeltran16/OpenPages-Source/models"
+	"github.com/diegoabeltran16/OpenPages-Source/models"
 )
 
 func TestReadTiddlers_Success(t *testing.T) {

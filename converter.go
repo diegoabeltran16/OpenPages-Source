@@ -7,7 +7,7 @@
 package main
 
 import (
-	"diegoabeltran16/OpenPages-Source/models"
+	"github.com/diegoabeltran16/OpenPages-Source/models"
 )
 
 // ConvertToRecord transforma un Tiddler en un Record estructurado.
