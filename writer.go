@@ -19,38 +19,39 @@ import (
 // cada Record como una línea válida de JSONL.
 // Parámetros:
 //   - path:   ruta del archivo de salida (.jsonl).
-//   - records: slice de modelos.Record a serializar.
+//   - records: slice de models.Record a serializar.
+//
 // Retorna:
 //   - error: si ocurre un fallo al crear el archivo, serializar o escribir.
 func WriteJSONL(path string, records []models.Record) error {
-	// 1) Crear (o truncar) el archivo de salida
+	// Crear o truncar el archivo de salida
 	file, err := os.Create(path)
 	if err != nil {
 		return fmt.Errorf("no se pudo crear el archivo '%s': %w", path, err)
 	}
-	defer file.Close()
+	defer func() {
+		if cerr := file.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("error al cerrar el archivo '%s': %w", path, cerr)
+		}
+	}()
 
-	// 2) Preparar un escritor buffered para eficiencia
 	writer := bufio.NewWriter(file)
-
-	// 3) Iterar sobre cada registro, serializar y escribir
+	// Iterar sobre cada registro y escribir en JSONL
 	for i, rec := range records {
-		// 3.a) Convertir el Record a JSON
-		lineBytes, err := json.Marshal(rec)
+		line, err := json.Marshal(rec)
 		if err != nil {
 			return fmt.Errorf("error al serializar Record en posición %d: %w", i, err)
 		}
 
-		// 3.b) Escribir la línea JSON y un salto de línea
-		if _, err := writer.Write(lineBytes); err != nil {
-			return fmt.Errorf("error al escribir Record JSON en posición %d: %w", i, err)
+		if _, err := writer.Write(line); err != nil {
+			return fmt.Errorf("error al escribir JSON en posición %d: %w", i, err)
 		}
 		if err := writer.WriteByte('\n'); err != nil {
 			return fmt.Errorf("error al escribir salto de línea en posición %d: %w", i, err)
 		}
 	}
 
-	// 4) Asegurar que todos los datos buffered se hayan volcado al disco
+	// Asegurar que todo se escribe en disco
 	if err := writer.Flush(); err != nil {
 		return fmt.Errorf("error al vaciar el buffer de escritura: %w", err)
 	}
