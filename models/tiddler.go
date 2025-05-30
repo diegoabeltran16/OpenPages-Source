@@ -1,31 +1,25 @@
-// Package models define las estructuras de datos centrales para la Vuelta 1 del pipeline OpenPages-Source.
-// Aquí modelamos los Tiddlers que provienen del JSON exportado de TiddlyWiki, incluyendo su tipo de contenido MIME.
+// models/tiddler.go – Definición del Tiddler crudo exportado de TiddlyWiki
+// -----------------------------------------------------------
+// Package models contiene las estructuras de datos centrales para el pipeline.
 package models
 
-// Tiddler representa un elemento básico extraído de un JSON de TiddlyWiki.
-// Cada campo refleja la información original que encontramos en el tiddler:
-//   - Title:    El título legible para humanos del tiddler.
-//   - Text:     El contenido bruto (puede estar en diversos formatos: Markdown, HTML, texto plano, etc.).
-//   - Type:     El tipo de contenido MIME del tiddler (p.ej. text/markdown, text/html, image/png).
-//   - Tags:     Etiquetas asociadas para clasificación.
-//   - Created:  Fecha de creación en formato TiddlyWiki.
-//   - Modified: Fecha de última modificación en formato TiddlyWiki.
+// Tiddler representa un elemento exportado de TiddlyWiki.
+// Cada campo refleja el JSON original:
+//  - Title:    Título único del tiddler.
+//  - Text:     Contenido bruto (puede incluir JSON embebido, Markdown, texto plano).
+//  - Type:     Tipo MIME del contenido (e.g., application/json, text/markdown).
+//  - Tags:     Cadena con etiquetas en formato [[tag1]] [[tag2]].
+//  - Created:  Timestamp de creación en formato TiddlyWiki.
+//  - Modified: Timestamp de última modificación en formato TiddlyWiki.
+//  - Color:    Color asociado (opcional).
+//  - TmapID:   Identificador interno de TiddlyMap (opcional).
 type Tiddler struct {
-    // Title es el nombre único del tiddler.
-    Title string `json:"title"`
-
-    // Text contiene el cuerpo del tiddler, tal como fue exportado.
-    Text string `json:"text"`
-
-    // Type indica el tipo de contenido MIME del tiddler.
-    Type string `json:"type"`
-
-    // Tags agrupa palabras clave para filtrado o agrupación.
-    Tags []string `json:"tags"`
-
-    // Created registra la fecha de creación tal cual la exporta TiddlyWiki.
-    Created string `json:"created"`
-
-    // Modified registra la última vez que se editó este tiddler.
-    Modified string `json:"modified"`
+	Title    string `json:"title"`
+	Text     string `json:"text"`
+	Type     string `json:"type"`
+	Tags     string `json:"tags"`
+	Created  string `json:"created"`
+	Modified string `json:"modified"`
+	Color    string `json:"color,omitempty"`
+	TmapID   string `json:"tmap.id,omitempty"`
 }

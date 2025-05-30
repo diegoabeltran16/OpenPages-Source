@@ -1,94 +1,88 @@
-// writer_test.go – Tests unitarios para writer.go
-// ------------------------------------------------
-// Pruebas de WriteJSONL para asegurar escritura correcta de JSONL
+// writer_test.go – Tests unitarios para WriteJSONL en writer.go
+// ------------------------------------------------------------
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/diegoabeltran16/OpenPages-Source/models"
 )
 
-func TestWriteJSONL_Success(t *testing.T) {
-	// Preparar registros de ejemplo
-	records := []models.Record{
-		{
-			ID:           "id1",
-			Title:        "Primer Título",
-			ContentType:  "text/plain",
-			Tags:         []string{"a", "b"},
-			TextMarkdown: "Texto **fuerte**",
-			TextPlain:    "Texto fuerte",
-			CreatedAt:    "2025-01-01T12:00:00Z",
-			ModifiedAt:   "2025-01-02T13:00:00Z",
-		},
-		{
-			ID:           "id2",
-			Title:        "Segundo Título",
-			ContentType:  "text/markdown",
-			Tags:         []string{"x", "y", "z"},
-			TextMarkdown: "# Encabezado",
-			TextPlain:    "Encabezado",
-			CreatedAt:    "2025-02-01T08:30:00Z",
-			ModifiedAt:   "2025-02-01T09:45:00Z",
-		},
-	}
-
-	// Crear archivo temporal de salida
-	tmpfile, err := os.CreateTemp("", "records-*.jsonl")
+// writeTempPath genera la ruta de un archivo temporal y lo cierra.
+func writeTempPath(t *testing.T) string {
+	t.Helper()
+	f, err := os.CreateTemp("", "out-*.jsonl")
 	if err != nil {
-		t.Fatalf("no se pudo crear archivo temporal: %v", err)
+		t.Fatalf("Error creando archivo temporal: %v", err)
 	}
-	defer os.Remove(tmpfile.Name())
+	path := f.Name()
+	f.Close()
+	return path
+}
 
-	// Llamar a WriteJSONL
-	if err := WriteJSONL(tmpfile.Name(), records); err != nil {
+func TestWriteJSONL_Success(t *testing.T) {
+	// Datos de prueba: dos records simples
+	recs := []models.Record{
+		{
+			ID:           "One",
+			Tags:         []string{"a", "b"},
+			ContentType:  "text/plain",
+			TextMarkdown: "foo",
+			TextPlain:    "foo",
+			CreatedAt:    "20250101",
+			ModifiedAt:   "20250102",
+		},
+		{
+			ID:           "Two",
+			Tags:         []string{"x"},
+			ContentType:  "application/json",
+			TextMarkdown: "{\"k\":1}",
+			TextPlain:    "{\"k\":1}",
+			CreatedAt:    "20250201",
+			ModifiedAt:   "20250202",
+		},
+	}
+
+	// Ruta temporal
+	path := writeTempPath(t)
+	defer os.Remove(path)
+
+	// Llamar a la función
+	if err := WriteJSONL(path, recs); err != nil {
 		t.Fatalf("WriteJSONL devolvió error: %v", err)
 	}
 
-	// Abrir el archivo para lectura
-	file, err := os.Open(tmpfile.Name())
+	// Leer el contenido resultante
+	data, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("no se pudo abrir archivo temporal: %v", err)
+		t.Fatalf("Error leyendo archivo de salida: %v", err)
 	}
-	defer file.Close()
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != len(recs) {
+		t.Fatalf("Número de líneas = %d, want %d", len(lines), len(recs))
+	}
 
-	// Leer línea por línea y deserializar
-	scanner := bufio.NewScanner(file)
-	var got []models.Record
-	for scanner.Scan() {
-		var rec models.Record
-		if err := json.Unmarshal(scanner.Bytes(), &rec); err != nil {
-			t.Fatalf("error al parsear JSONL: %v", err)
+	// Parsear y comparar cada línea
+	for i, line := range lines {
+		var got models.Record
+		if err := json.Unmarshal([]byte(line), &got); err != nil {
+			t.Errorf("Línea %d: error al parsear JSON: %v", i, err)
+			continue
 		}
-		got = append(got, rec)
-	}
-	if err := scanner.Err(); err != nil {
-		t.Fatalf("error al escanear archivo: %v", err)
-	}
-
-	// Verificar número de registros
-	if len(got) != len(records) {
-		t.Fatalf("se esperaban %d registros, pero se obtuvieron %d", len(records), len(got))
-	}
-
-	// Comparar cada registro
-	for i := range records {
-		if !reflect.DeepEqual(got[i], records[i]) {
-			t.Errorf("Registro %d diferente:\n got= %+v\n want=%+v", i, got[i], records[i])
+		if !reflect.DeepEqual(got, recs[i]) {
+			t.Errorf("Línea %d: got %+v, want %+v", i, got, recs[i])
 		}
 	}
 }
 
-func TestWriteJSONL_ErrorCreatingFile(t *testing.T) {
-	// Intentar escribir en un directorio inexistente
-	badPath := "/ruta/que/no/existe/output.jsonl"
-	recs := []models.Record{}
-	if err := WriteJSONL(badPath, recs); err == nil {
-		t.Error("WriteJSONL no devolvió error al intentar crear archivo en ruta inválida")
+func TestWriteJSONL_InvalidPath(t *testing.T) {
+	// Intentar escribir en directorio inexistente
+	err := WriteJSONL("/no/existe/salida.jsonl", []models.Record{})
+	if err == nil {
+		t.Errorf("Esperaba error al escribir en ruta inválida, pero fue nil")
 	}
 }
