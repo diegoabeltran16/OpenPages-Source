@@ -12,6 +12,12 @@
 //   • Firma ahora acepta `context.Context` para futuras cancelaciones.
 //   • Código sigue 100 % determinista: si algo falla, retorna `error`.
 // --------------------------------------------------------------------------------
+//
+// Cambios clave
+//   • Firma: WriteJSONL(ctx, path, records any, pretty bool)
+//   • `records` debe ser un slice (v1 o v2) – se itera vía reflect.
+//   • Flag `pretty` decide entre Marshal y MarshalIndent.
+// --------------------------------------------------------------------------------
 
 package exporter
 
@@ -19,58 +25,61 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
-
-	"github.com/diegoabeltran16/OpenPages-Source/models"
+	"reflect"
 )
 
-// WriteJSONL serializa `records` al archivo `path` (crea o trunca).
+// WriteJSONL serializa cualquier slice de structs a JSONL.
 //
-// Parámetros
-// ----------
-//   - ctx     – permite cancelar cuando se implemente escritura chunked.
-//   - path    – destino en disco (se crea/trunca).
-//   - records – slice ordenado que se volcará tal cual.
-//
-// Retorna
-// -------
-//   - error – nil en éxito; descriptivo en cualquier fallo.
-func WriteJSONL(ctx context.Context, path string, records []models.Record) error {
-	_ = ctx // sin uso por ahora; se conservará para compatibilidad futura
+//   - records – debe ser un slice (p. ej. []models.Record o []models.RecordV2)
+//   - pretty  – true → MarshalIndent (legible); false → Marshal (compacto)
+func WriteJSONL(ctx context.Context, path string, records any, pretty bool) error {
+	_ = ctx // reservado para cancelaciones futuras
 
-	// 1) Crear/truncar archivo ------------------------------------------------
+	v := reflect.ValueOf(records)
+	if v.Kind() != reflect.Slice {
+		return errors.New("records debe ser slice")
+	}
+
 	file, err := os.Create(path)
 	if err != nil {
-		return fmt.Errorf("no se pudo crear '%s': %w", path, err)
+		return fmt.Errorf("crear '%s': %w", path, err)
 	}
 	defer func() {
 		if cerr := file.Close(); cerr != nil && err == nil {
-			err = fmt.Errorf("error al cerrar '%s': %w", path, cerr)
+			err = fmt.Errorf("cerrar '%s': %w", path, cerr)
 		}
 	}()
 
-	// 2) Buffer de escritura --------------------------------------------------
 	w := bufio.NewWriter(file)
 
-	for i, rec := range records {
-		// Cancelación futura: if ctx.Err() != nil { return ctx.Err() }
+	for i := 0; i < v.Len(); i++ {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		elem := v.Index(i).Interface()
 
-		line, err := json.Marshal(rec)
+		var line []byte
+		if pretty {
+			line, err = json.MarshalIndent(elem, "", "  ")
+		} else {
+			line, err = json.Marshal(elem)
+		}
 		if err != nil {
-			return fmt.Errorf("error serializando record #%d: %w", i, err)
+			return fmt.Errorf("marshal elemento %d: %w", i, err)
 		}
 		if _, err := w.Write(line); err != nil {
-			return fmt.Errorf("error escribiendo record #%d: %w", i, err)
+			return fmt.Errorf("escribir elemento %d: %w", i, err)
 		}
 		if err := w.WriteByte('\n'); err != nil {
-			return fmt.Errorf("error escribiendo \n en record #%d: %w", i, err)
+			return fmt.Errorf("newline elemento %d: %w", i, err)
 		}
 	}
 
-	// 3) Flush ---------------------------------------------------------------
 	if err := w.Flush(); err != nil {
-		return fmt.Errorf("error al vaciar buffer: %w", err)
+		return fmt.Errorf("flush: %w", err)
 	}
 	return nil
 }
