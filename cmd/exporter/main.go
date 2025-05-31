@@ -36,7 +36,6 @@ import (
 	"log"
 	"os"
 
-	// paquetes internos – sólo visibles dentro del módulo
 	"github.com/diegoabeltran16/OpenPages-Source/internal/exporter"
 	"github.com/diegoabeltran16/OpenPages-Source/internal/importer"
 	"github.com/diegoabeltran16/OpenPages-Source/internal/transform"
@@ -45,38 +44,40 @@ import (
 func main() {
 	ctx := context.Background()
 
-	// -----------------------------------------------------------------
-	// 1) Flags CLI
-	// -----------------------------------------------------------------
+	// ------------------------------------------------------------ Flags
 	in := flag.String("input", "", "JSON exportado de TiddlyWiki")
 	out := flag.String("output", "", "Archivo JSONL de salida")
+	mode := flag.String("mode", "v1", "v1 | v2  (estructura del JSONL)")
+	pretty := flag.Bool("pretty", false, "MarshalIndent en lugar de compacto")
 	flag.Parse()
 
 	if *in == "" || *out == "" {
-		fmt.Println("❌ Uso: exporter -input export.json -output salida.jsonl")
+		fmt.Println("Uso: exporter -input tiddlers.json -output sal.jsonl [-mode v2]")
 		os.Exit(1)
 	}
 
-	// -----------------------------------------------------------------
-	// 2) Leer tiddlers
-	// -----------------------------------------------------------------
+	// ------------------------------------------------------ Leer tiddlers
 	tiddlers, err := importer.Read(ctx, *in)
 	if err != nil {
 		log.Fatalf("❌ error leyendo tiddlers: %v", err)
 	}
 	fmt.Printf("📦 %d tiddlers cargados\n", len(tiddlers))
 
-	// -----------------------------------------------------------------
-	// 3) Convertir a records
-	// -----------------------------------------------------------------
-	records := transform.ConvertTiddlers(tiddlers)
-
-	// -----------------------------------------------------------------
-	// 4) Escribir JSONL
-	// -----------------------------------------------------------------
-	if err := exporter.WriteJSONL(ctx, *out, records); err != nil {
-		log.Fatalf("❌ error escribiendo JSONL: %v", err)
+	// -------------------------------------------------- Convertir según modo
+	switch *mode {
+	case "v2":
+		recs := transform.ConvertTiddlersV2(tiddlers)
+		if err := exporter.WriteJSONL(ctx, *out, recs, *pretty); err != nil {
+			log.Fatalf("❌ escribir JSONL v2: %v", err)
+		}
+	case "v1":
+		recs := transform.ConvertTiddlers(tiddlers)
+		if err := exporter.WriteJSONL(ctx, *out, recs, *pretty); err != nil {
+			log.Fatalf("❌ escribir JSONL v1: %v", err)
+		}
+	default:
+		log.Fatalf("modo desconocido: %s (use v1 o v2)", *mode)
 	}
 
-	fmt.Printf("✅ Exportación completada: %s (%d registros)\n", *out, len(records))
+	fmt.Printf("✅ Exportación completada (%s)\n", *out)
 }
