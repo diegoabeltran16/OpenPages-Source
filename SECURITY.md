@@ -1,20 +1,10 @@
 # 🛡️ Política de Seguridad – OpenPages-Source
 
-## 🔢 Versiones con soporte
-
-En esta fase del proyecto (MVP), el soporte de seguridad se centra únicamente en la rama principal en desarrollo. Las versiones anteriores o experimentales no recibirán parches de seguridad.
-
-| Versión | Soporte actual       |
-| ------- | -------------------- |
-| main    | ✅ Activa y mantenida |
-| 0.1.x   | ❌ No mantenida       |
-| < 0.1   | ❌ Obsoleta           |
-
 ---
 
 ## 📣 Cómo reportar una vulnerabilidad
 
-Si encontrás un problema de seguridad (por ejemplo: ejecución de código malicioso, lectura no autorizada de archivos, inyección de texto en outputs), por favor:
+Si encuentras un problema de seguridad (por ejemplo: ejecución de código malicioso, lectura no autorizada de archivos, inyección de texto en outputs), por favor:
 
 1. **No abras un issue público.**
 2. Reportalo de forma privada enviando un correo a:

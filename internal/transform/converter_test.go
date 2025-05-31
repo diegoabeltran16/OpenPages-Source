@@ -1,6 +1,12 @@
-// converter_test.go – Tests unitarios para converter.go
-// ------------------------------------------------------
-package main
+// internal/transform/converter_test.go – Tests para transform.ConvertTiddlers
+// --------------------------------------------------------------------------------
+// Estas pruebas viven en el **mismo paquete** (`transform`) para acceder al
+// helper no exportado `parseTags`.  Verifican:
+//   1. Extracción correcta de etiquetas.
+//   2. Conversión completa Tiddler → Record con indentado JSON.
+// --------------------------------------------------------------------------------
+
+package transform
 
 import (
 	"reflect"
@@ -9,14 +15,20 @@ import (
 	"github.com/diegoabeltran16/OpenPages-Source/models"
 )
 
-func TestParseTags(t *testing.T) {
+// write helper innecesario: los datos están embebidos como literales JSON.
+
+// Test_parseTags comprueba la extracción de etiquetas, incluyendo espacios.
+func Test_parseTags(t *testing.T) {
 	raw := "[[tag1]] [[tag 2]] [[tag3]]"
 	want := []string{"tag1", "tag 2", "tag3"}
-	if got := parseTags(raw); !reflect.DeepEqual(got, want) {
+
+	got := parseTags(raw)
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("parseTags(%q) = %v, want %v", raw, got, want)
 	}
 }
 
+// TestConvertTiddlers verifica el flujo integral, incluyendo el pretty-print de JSON embebido.
 func TestConvertTiddlers(t *testing.T) {
 	tiddlers := []models.Tiddler{
 		{
@@ -37,7 +49,6 @@ func TestConvertTiddlers(t *testing.T) {
 		},
 	}
 
-	got := ConvertTiddlers(tiddlers)
 	want := []models.Record{
 		{
 			ID:           "Foo",
@@ -59,6 +70,7 @@ func TestConvertTiddlers(t *testing.T) {
 		},
 	}
 
+	got := ConvertTiddlers(tiddlers)
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("ConvertTiddlers() = %+v, want %+v", got, want)
 	}
