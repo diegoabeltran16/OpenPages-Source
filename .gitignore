@@ -175,3 +175,12 @@ cython_debug/
 
 # Estructura
 estructura.txt
+
+# Exportador de repositorio
+rep-export-LINUX/
+
+# In
+.data/in/tiddlers.json
+
+# Out
+.data/out/tiddlers.jsonl
