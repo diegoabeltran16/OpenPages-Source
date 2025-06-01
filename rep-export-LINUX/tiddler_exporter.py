@@ -42,7 +42,7 @@ OUTPUT_DIR = SCRIPT_DIR / "tiddlers-export"  # Carpeta donde se escribirán los 
 HASH_FILE = SCRIPT_DIR / ".hashes.json"       # Archivo que almacena hashes previos para detectar cambios
 
 # Extensiones válidas (archivos que queremos convertir a tiddlers)
-VALID_EXTENSIONS = ['.py', '.md', '.json', '.sh', '.html', '.css', '.yml', '.txt']
+VALID_EXTENSIONS = ['.py', '.md', '.json', '.sh', '.html', '.css', '.yml', '.txt','.go']
 # Archivos sin extensión que queremos incluir (ej. .gitignore)
 ALLOWED_FILENAMES = ['.gitignore']
 
@@ -61,7 +61,8 @@ LANGUAGE_MAP = {
     '.yml': 'bash',
     '.html': 'html',
     '.txt': 'txt',
-    '.css': 'css'
+    '.css': 'css',
+    '.go' : 'go'
 }
 
 # Mapa para archivos especiales por nombre (ej. .gitignore)
