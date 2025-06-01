@@ -2,31 +2,32 @@
 // --------------------------------------------------------------------------------
 // Contexto pedagógico
 // -------------------
-// Este archivo *amarra* los tres componentes del pipeline: *reader.go*,
-// *converter.go* y *writer.go*.
+// Este archivo conecta los tres componentes del pipeline: `reader.go`,
+// `converter.go` y `writer.go`, permitiendo ejecutar la transformación
+// desde línea de comandos con flexibilidad.
 //
 // --------------------------------------------------------------------------------
-// RESPONSABILIDAD PRINCIPAL
+// RESPONSABILIDADES
 // --------------------------------------------------------------------------------
-// 1. **Parsear flags**:  `-input` para el export JSON de TiddlyWiki y `-output`
-//    para el archivo destino JSONL.
-// 2. Validar que ambos argumentos existan; si no, mostrar *usage* y abortar.
-// 3. Orquestar:
-//      • Leer tiddlers       → `ReadTiddlers`.
-//      • Convertir a records → `ConvertTiddlers`.
-//      • Escribir JSONL      → `WriteJSONL`.
-// 4. Reportar progreso y errores de forma amigable.
+// 1. Parsear flags: `-input`, `-output`, `-mode`, `-pretty`
+// 2. Validar y resolver rutas (archivo o directorio)
+// 3. Leer tiddlers → Convertir → Exportar como JSONL
+// 4. Manejar errores de forma amigable
 //
 // --------------------------------------------------------------------------------
-// CÓMO COMPILAR Y EJECUTAR
+// CÓMO EJECUTAR (ejemplos)
 // --------------------------------------------------------------------------------
-//   go run ./cmd/exporter \
-//     -input /home/naveen/Documents/OpenPages-Source/data/in/tiddlers.json \
-//     -output /home/naveen/Documents/OpenPages-Source/data/out/tiddlers.jsonl
+// go run ./cmd/exporter \
+//   -input ./data/in \
+//   -output ./data/out \
+//   -mode v2
 //
+// go run ./cmd/exporter \
+//   -input ./data/in/tiddlers.json \
+//   -output ./data/out/tiddlers.jsonl \
+//   -mode v1 -pretty
 // --------------------------------------------------------------------------------
 
-// cmd/exporter/main.go
 package main
 
 import (
@@ -35,6 +36,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/diegoabeltran16/OpenPages-Source/internal/exporter"
 	"github.com/diegoabeltran16/OpenPages-Source/internal/importer"
@@ -44,26 +46,63 @@ import (
 func main() {
 	ctx := context.Background()
 
-	// ------------------------------------------------------------ Flags
-	in := flag.String("input", "", "JSON exportado de TiddlyWiki")
-	out := flag.String("output", "", "Archivo JSONL de salida")
-	mode := flag.String("mode", "v1", "v1 | v2  (estructura del JSONL)")
-	pretty := flag.Bool("pretty", false, "MarshalIndent en lugar de compacto")
+	// ------------------------------------------------------------ Flags CLI
+	in := flag.String("input", "", "Archivo o carpeta con JSON exportado de TiddlyWiki")
+	out := flag.String("output", "", "Ruta de salida: archivo .jsonl o carpeta")
+	mode := flag.String("mode", "v1", "Modo de conversión: v1 (plano) | v2 (meta/content)")
+	pretty := flag.Bool("pretty", false, "Usar indentación en lugar de JSONL compacto")
 	flag.Parse()
 
+	// ------------------------------ Validar argumentos obligatorios
 	if *in == "" || *out == "" {
-		fmt.Println("Uso: exporter -input tiddlers.json -output sal.jsonl [-mode v2]")
+		fmt.Println("Uso: exporter -input origen.json|carpeta -output destino.jsonl|carpeta [-mode v2]")
 		os.Exit(1)
 	}
 
-	// ------------------------------------------------------ Leer tiddlers
+	// ------------------------------ Resolver input (archivo o directorio)
+	fi, err := os.Stat(*in)
+	if err != nil {
+		log.Fatalf("❌ no se pudo acceder a '%s': %v", *in, err)
+	}
+	if fi.IsDir() {
+		files, err := os.ReadDir(*in)
+		if err != nil {
+			log.Fatalf("❌ no se pudo listar archivos en '%s': %v", *in, err)
+		}
+		found := false
+		for _, f := range files {
+			if !f.IsDir() && filepath.Ext(f.Name()) == ".json" {
+				*in = filepath.Join(*in, f.Name())
+				found = true
+				break
+			}
+		}
+		if !found {
+			log.Fatalf("❌ no se encontró ningún archivo .json en la carpeta '%s'", *in)
+		}
+	}
+
+	// ------------------------------ Resolver output (archivo o carpeta)
+	fo, err := os.Stat(*out)
+	if err == nil && fo.IsDir() {
+		// Si existe y es carpeta: usar archivo por defecto dentro
+		*out = filepath.Join(*out, "out.jsonl")
+	} else if os.IsNotExist(err) && filepath.Ext(*out) == "" {
+		// Si no existe y no tiene extensión: crear carpeta
+		if err := os.MkdirAll(*out, 0755); err != nil {
+			log.Fatalf("❌ no se pudo crear carpeta de salida: %v", err)
+		}
+		*out = filepath.Join(*out, "out.jsonl")
+	}
+
+	// ------------------------------ Leer tiddlers
 	tiddlers, err := importer.Read(ctx, *in)
 	if err != nil {
 		log.Fatalf("❌ error leyendo tiddlers: %v", err)
 	}
 	fmt.Printf("📦 %d tiddlers cargados\n", len(tiddlers))
 
-	// -------------------------------------------------- Convertir según modo
+	// ------------------------------ Convertir y exportar según modo
 	switch *mode {
 	case "v2":
 		recs := transform.ConvertTiddlersV2(tiddlers)
@@ -76,7 +115,7 @@ func main() {
 			log.Fatalf("❌ escribir JSONL v1: %v", err)
 		}
 	default:
-		log.Fatalf("modo desconocido: %s (use v1 o v2)", *mode)
+		log.Fatalf("❌ modo desconocido: %s (usa 'v1' o 'v2')", *mode)
 	}
 
 	fmt.Printf("✅ Exportación completada (%s)\n", *out)
