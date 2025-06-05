@@ -1,19 +1,22 @@
-// internal/exporter/writer.go – Persistencia de records en JSONL
+// internal/exporter/writer.go – Persistencia de registros en JSONL (v3)
 // --------------------------------------------------------------------------------
 // Contexto pedagógico
 // -------------------
-// Aquí mejoramos el Writer para asegurarnos de que:
+// Esta versión robustecida de WriteJSONL garantiza:
 //
-//   1. El directorio padre de `path` exista (creamos con os.MkdirAll).
-//   2. Usamos un `err` nombrado para que el `defer` detecte problemas al cerrar.
-//   3. Registramos (mensajito a stdout) cuántos registros vamos a escribir.
-//   4. Retornamos errores claros si algo falla en cualquiera de las etapas.
+//   1. Creación del directorio padre si no existe.
+//   2. Named return para capturar errores al cerrar.
+//   3. Impresión en consola de la cantidad de objetos que se escribirán.
+//   4. Serialización de cualquier slice (p.ej. []map[string]any de v3) a JSONL estricto.
+//   5. Opción “pretty” para inspección humana: aunque genere multilínea,
+//      siempre agrega un solo '\n' al final de cada objeto.
 //
 // Firma:
 //   WriteJSONL(ctx, path, records any, pretty bool) error
-//     - `path` puede incluir subdirectorios: si no existen, los creamos.
-//     - `records` debe ser un slice (por ejemplo []models.RecordV2).
-//     - `pretty` decide entre json.Marshal (compacto) o json.MarshalIndent (legible).
+//     - ctx: contexto para cancelaciones futuras.
+//     - path: ruta al archivo de salida (se crea su carpeta si falta).
+//     - records: debe ser un slice (p.ej. []models.Record, []models.RecordV2 o []map[string]any).
+//     - pretty: si true, MarshalIndent (multilínea); si false, Marshal compacto (una línea por objeto).
 // --------------------------------------------------------------------------------
 
 package exporter
@@ -29,19 +32,27 @@ import (
 	"reflect"
 )
 
-// WriteJSONL serializa cualquier slice de structs a un archivo JSONL.
+// WriteJSONL serializa cualquier slice de elementos a un archivo JSONL.
+// Cada elemento del slice se convierte en un JSON y se escribe como una línea.
+// Si pretty==true, cada objeto queda indentado (multilínea) pero con un solo '\n' al final;
+// si pretty==false, cada objeto ocupa exactamente una línea compacta.
 //
-//   - ctx: contexto para abortar si se desea cancelar.
-//   - path: ruta donde se escribirá el JSONL (se crea directorio padre si hace falta).
-//   - records: debe ser un slice de structs (por ejemplo []models.RecordV2).
-//   - pretty: si true, se usa MarshalIndent; si false, Marshal (una línea compacta por registro).
+// Ejemplo con v3:
+//
+//	recs := transform.ConvertTiddlersV3(tiddlers)  // []map[string]any
+//	WriteJSONL(ctx, "out.jsonl", recs, false)
+//
+// Ejemplo con v2:
+//
+//	recsV2 := transform.ConvertTiddlersV2(tiddlers)  // []models.RecordV2
+//	WriteJSONL(ctx, "out_pretty.json", recsV2, true)
 func WriteJSONL(ctx context.Context, path string, records any, pretty bool) (err error) {
-	_ = ctx // reservado para posibles cancelaciones en el futuro
+	_ = ctx // reservado para cancelaciones futuras
 
-	// 1) Verificar que records sea slice
+	// 1) Verificar que 'records' sea un slice
 	v := reflect.ValueOf(records)
 	if v.Kind() != reflect.Slice {
-		return errors.New("records debe ser slice")
+		return errors.New("records debe ser un slice")
 	}
 	count := v.Len()
 
@@ -53,33 +64,34 @@ func WriteJSONL(ctx context.Context, path string, records any, pretty bool) (err
 		}
 	}
 
-	// 3) Crear (o truncar) el archivo
+	// 3) Crear (o truncar) el archivo de salida
 	file, createErr := os.Create(path)
 	if createErr != nil {
 		return fmt.Errorf("crear '%s': %w", path, createErr)
 	}
-	// Usamos named return 'err' para que defer pueda capturar errores de Close
+	// Named return para capturar posibles errores al cerrar
 	defer func() {
 		if cerr := file.Close(); cerr != nil && err == nil {
 			err = fmt.Errorf("cerrar '%s': %w", path, cerr)
 		}
 	}()
 
-	// 4) Preparar el writer con buffer
+	// 4) Preparar buffer para escritura
 	w := bufio.NewWriter(file)
 
-	// 5) Mensaje informativo: cuántos registros vamos a escribir
+	// 5) Informar cuántos registros se escribirán
 	fmt.Printf("💾 Escribiendo %d registros en '%s'...\n", count, path)
 
-	// 6) Iterar sobre cada elemento en el slice
+	// 6) Iterar sobre cada elemento del slice
 	for i := 0; i < count; i++ {
+		// Permitir cancelación si ctx se ha cancelado
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 
 		elem := v.Index(i).Interface()
 
-		// 6.1) Serializar a JSON (indentado o compacto según `pretty`)
+		// 6.1) Serializar a JSON
 		var line []byte
 		if pretty {
 			line, err = json.MarshalIndent(elem, "", "  ")
@@ -90,7 +102,7 @@ func WriteJSONL(ctx context.Context, path string, records any, pretty bool) (err
 			return fmt.Errorf("marshal elemento %d: %w", i, err)
 		}
 
-		// 6.2) Escribir la línea y un salto de línea
+		// 6.2) Escribir el JSON y un solo '\n'
 		if _, err = w.Write(line); err != nil {
 			return fmt.Errorf("escribir elemento %d: %w", i, err)
 		}
@@ -99,7 +111,7 @@ func WriteJSONL(ctx context.Context, path string, records any, pretty bool) (err
 		}
 	}
 
-	// 7) Hacer flush del buffer para asegurar que todo esté en disco
+	// 7) Forzar escritura en disco
 	if err = w.Flush(); err != nil {
 		return fmt.Errorf("flush: %w", err)
 	}

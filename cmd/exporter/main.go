@@ -1,10 +1,24 @@
-// cmd/exporter/main.go – Exportador con deduplicación por hash (versión corregida)
-// ----------------------------------------------------------------------------
-// Lee un archivo de tiddlers (.json), aplica deduplicación por hash
-// (Título + Modified + Texto), utiliza ConvertTiddlersV3 para transformar
-// cada tiddler individual al modelo RecordV2 y finalmente guarda todo en
-// JSONL (o JSON indented si se solicita).
-// ----------------------------------------------------------------------------
+// cmd/exporter/main.go – Orquestador principal del pipeline (v1, v2 y v3)
+// --------------------------------------------------------------------------------
+// Contexto pedagógico
+// -------------------
+//   1. Parsear flags: -input, -output, -mode (v1|v2|v3), -pretty
+//   2. Si input es carpeta, buscar el primer .json adentro.
+//   3. Si output es carpeta o no existe sin extensión, crear carpeta y usar out.jsonl dentro.
+//   4. Llamar a importer.Read → transform.ConvertTiddlers{V1,V2,V3} → exporter.WriteJSONL
+//   5. Mostrar mensajes en consola y manejar errores.
+//
+// Ejemplos de uso:
+//   go run ./cmd/exporter \
+//     -input ./data/in \
+//     -output ./data/out \
+//     -mode v3
+//
+//   go run ./cmd/exporter \
+//     -input ./data/in/tiddlers.json \
+//     -output ./data/out/tiddlers.jsonl \
+//     -mode v1 -pretty
+// --------------------------------------------------------------------------------
 
 package main
 
@@ -16,78 +30,93 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/diegoabeltran16/OpenPages-Source/internal/dedup"
 	"github.com/diegoabeltran16/OpenPages-Source/internal/exporter"
 	"github.com/diegoabeltran16/OpenPages-Source/internal/importer"
 	"github.com/diegoabeltran16/OpenPages-Source/internal/transform"
-	"github.com/diegoabeltran16/OpenPages-Source/models"
 )
 
 func main() {
-	// ------------------ 🔧 Flags CLI ------------------
-	inPath := flag.String("input", "", "Ruta al archivo JSON exportado de TiddlyWiki (requerido)")
-	outPath := flag.String("output", "", "Ruta al archivo JSONL de salida (requerido)")
-	pretty := flag.Bool("pretty", false, "Si se establece, formatea cada JSON con indentación")
+	ctx := context.Background()
+
+	// 1) Flags CLI
+	in := flag.String("input", "", "Archivo o carpeta con JSON exportado de TiddlyWiki (requerido)")
+	out := flag.String("output", "", "Ruta de salida: archivo .jsonl o carpeta (requerido)")
+	mode := flag.String("mode", "v1", "Modo de conversión: v1 (plano) | v2 (meta/content) | v3 (JSONL mínimo)")
+	pretty := flag.Bool("pretty", false, "Usar indentación en lugar de JSONL compacto")
 	flag.Parse()
 
-	if *inPath == "" || *outPath == "" {
-		fmt.Fprintf(os.Stderr, "Uso: %s -input <tiddlers.json> -output <salida.jsonl> [-pretty]\n",
-			filepath.Base(os.Args[0]))
+	// 2) Validar obligatorio
+	if *in == "" || *out == "" {
+		fmt.Println("Uso: exporter -input origen.json|carpeta -output destino.jsonl|carpeta [-mode v2|v3] [-pretty]")
 		os.Exit(1)
 	}
 
-	// ------------------ 📥 Lectura del archivo de tiddlers ------------------
-	ctx := context.Background()
-	tiddlers, err := importer.Read(ctx, *inPath)
+	// 3) Resolver input (archivo o directorio)
+	fi, err := os.Stat(*in)
 	if err != nil {
 		log.Fatalf("❌ Error leyendo tiddlers desde '%s': %v", *inPath, err)
 	}
-	log.Printf("📦 %d tiddlers cargados", len(tiddlers))
-
-	// ------------------ 🛠 Crear carpeta de cache para hashes ------------------
-	cacheDir := "data/cache"
-	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
-		log.Fatalf("❌ No se pudo crear directorio '%s': %v", cacheDir, err)
+	if fi.IsDir() {
+		files, err := os.ReadDir(*in)
+		if err != nil {
+			log.Fatalf("❌ no se pudo listar '%s': %v", *in, err)
+		}
+		found := false
+		for _, f := range files {
+			if !f.IsDir() && filepath.Ext(f.Name()) == ".json" {
+				*in = filepath.Join(*in, f.Name())
+				found = true
+				break
+			}
+		}
+		if !found {
+			log.Fatalf("❌ no se encontró ningún .json en '%s'", *in)
+		}
 	}
 
-	// ------------------ 🧠 Deduplicación usando FileStore ------------------
-	// Ahora que hemos creado data/cache, OpenFile puede crear hashes.txt allí.
-	hashFile := filepath.Join(cacheDir, "hashes.txt")
-	store, err := dedup.NewFileStore(hashFile)
+	// 4) Resolver output (archivo o carpeta)
+	fo, err := os.Stat(*out)
+	if err == nil && fo.IsDir() {
+		// Si existe y es carpeta: usar archivo por defecto dentro
+		*out = filepath.Join(*out, "out.jsonl")
+	} else if os.IsNotExist(err) && filepath.Ext(*out) == "" {
+		// Si no existe y no tiene extensión: crear carpeta
+		if mkdirErr := os.MkdirAll(*out, 0755); mkdirErr != nil {
+			log.Fatalf("❌ no se pudo crear carpeta '%s': %v", *out, mkdirErr)
+		}
+		*out = filepath.Join(*out, "out.jsonl")
+	}
+
+	// 5) Leer tiddlers
+	tiddlers, err := importer.Read(ctx, *in)
 	if err != nil {
 		log.Fatalf("❌ No se pudo inicializar deduplicador: %v", err)
 	}
-	defer store.Close()
+	fmt.Printf("📦 %d tiddlers cargados\n", len(tiddlers))
 
-	var filteredRecords []models.RecordV2
-	dedupedCount := 0
-
-	for _, t := range tiddlers {
-		// 1) Calcular hash usando título + modified + texto
-		hash := dedup.HashTiddler(t)
-		if store.Seen(hash) {
-			dedupedCount++
-			continue // Saltar tiddler ya visto
-		}
-		if err := store.Mark(hash); err != nil {
-			log.Printf("⚠️  No se pudo registrar hash '%s': %v", hash, err)
-			continue
+	// 6) Convertir y exportar según modo
+	switch *mode {
+	case "v3":
+		recs := transform.ConvertTiddlersV3(tiddlers)
+		if err := exporter.WriteJSONL(ctx, *out, recs, *pretty); err != nil {
+			log.Fatalf("❌ escribir JSONL v3: %v", err)
 		}
 
-		// 2) Convertir este único tiddler a RecordV2 vía ConvertTiddlersV3:
-		//    Pasamos un slice de longitud 1 y luego tomamos el [0].
-		singleSlice := []models.Tiddler{t}
-		recs := transform.ConvertTiddlersV3(singleSlice)
-		// ConvertTiddlersV3 siempre retorna un slice de la misma longitud:
-		// en este caso, len(recs) == 1.
-		filteredRecords = append(filteredRecords, recs[0])
-	}
-	log.Printf("🧹 Deduplicación aplicada: %d descartados, %d a exportar",
-		dedupedCount, len(filteredRecords))
+	case "v2":
+		recs := transform.ConvertTiddlersV2(tiddlers)
+		if err := exporter.WriteJSONL(ctx, *out, recs, *pretty); err != nil {
+			log.Fatalf("❌ escribir JSONL v2: %v", err)
+		}
 
-	// ------------------ 📤 Escritura en JSONL / JSON indentado ------------------
-	if err := exporter.WriteJSONL(ctx, *outPath, filteredRecords, *pretty); err != nil {
-		log.Fatalf("❌ Error al escribir salida: %v", err)
+	case "v1":
+		recs := transform.ConvertTiddlers(tiddlers)
+		if err := exporter.WriteJSONL(ctx, *out, recs, *pretty); err != nil {
+			log.Fatalf("❌ escribir JSONL v1: %v", err)
+		}
+
+	default:
+		log.Fatalf("❌ modo desconocido: %s (usa 'v1', 'v2' o 'v3')", *mode)
 	}
-	log.Printf("✅ Exportación completada en '%s'", *outPath)
+
+	fmt.Printf("✅ Exportación completada (destino: %s)\n", *out)
 }

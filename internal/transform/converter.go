@@ -1,19 +1,22 @@
-// internal/transform/converter.go – v3
+// internal/transform/converter.go – v1, v2 y nueva versión v3 con esquema mínimo
 // --------------------------------------------------------------------------------
-// Esta versión potencia el conversor con las siguientes mejoras:
+// Este archivo expone tres funciones públicas:
+//   • ConvertTiddlers   → genera []models.Record     (esquema heredado v1).
+//   • ConvertTiddlersV2 → genera []models.RecordV2   (esquema AI-friendly v2).
+//   • ConvertTiddlersV3 → genera []map[string]any    (esquema mínimo para JSONL estricto v3).
 //
-//  1. Reconoce tiddlers de código (los que tienen Title que empieza con "-").
-//  2. Detecta automáticamente el lenguaje de un archivo de código según su extensión.
-//  3. Corrige el parseo de fechas que incluyen milisegundos (yyyymmddHHMMSSmmm).
-//  4. Clasifica cada RecordV2 como "code" o "tiddler" para que puedas filtrarlos fácilmente.
-//  5. Genera un RecordV2 (AI-friendly) que separa Meta ↔ Content, enriqueciendo la salida.
+// La versión v3 produce objetos JSON planos que cumplen con:
 //
-// Estructura general:
-//   • parseTags     → Extrae las etiquetas [[tag]] de un string.
-//   • parseTWDate   → Intenta convertir "yyyymmddHHMMSSmmm" o "yyyymmdd" en time.Time.
-//   • detectLanguageByExtension → Dado un nombre de archivo (.go, .py, etc.), devuelve el string "go", "python"….
-//   • ConvertTiddlersV3 → Toma []models.Tiddler y devuelve []models.RecordV2 siguiendo la lógica descrita.
+//   - Una sola línea por objeto (ideal para JSONL).
+//   - Campos esenciales: id, title, created, modified, tags, tmap.id, relations, type, text.
+//   - Fechas en RFC3339 con zona (por ejemplo "2025-06-05T15:10:00-05:00").
+//   - Sin duplicación de tags ni niveles de anidación innecesarios.
 //
+// De esta manera, un JSONL estricto tendrá líneas como:
+//
+//   {"id":"_____BirdsColor","title":"_____BirdsColor","created":"2025-06-05T15:10:00-05:00", ... }
+//
+// --------------------------------------------------------------------------------
 
 package transform
 
@@ -34,7 +37,7 @@ import (
 // tagRe compila una expresión regular que matchea [[cualquier_texto]]
 var tagRe = regexp.MustCompile(`\[\[([^]]+)\]\]`)
 
-// parseTags recibe un string como "[[foo]] [[bar baz]]" y devuelve []string{"foo", "bar baz"}
+// parseTags extrae todas las etiquetas de la forma [[etiqueta]] de un string.
 func parseTags(raw string) []string {
 	matches := tagRe.FindAllStringSubmatch(raw, -1)
 	tags := make([]string, 0, len(matches))
@@ -46,12 +49,8 @@ func parseTags(raw string) []string {
 	return tags
 }
 
-// -----------------------------------------------------------------------------
-// 2. Parseador de fechas de TiddlyWiki, incluyendo milisegundos
-// -----------------------------------------------------------------------------
-
-// parseTWDate intenta convertir formatos "yyyymmddHHMMSSmmm", "yyyymmddHHMMSS" o "yyyymmdd"
-// Devuelve time.Time y true si tuvo éxito, o time.Time{} y false en caso contrario.
+// parseTWDate intenta parsear un string TiddlyWiki (yyyymmddhhMMSS o yyyymmdd).
+// Devuelve time.Time y true si tuvo éxito; de lo contrario, time.Time{} y false.
 func parseTWDate(raw string) (time.Time, bool) {
 	layouts := []string{
 		"20060102150405000", // yyyymmddHHMMSSmmm (17 dígitos)
@@ -59,15 +58,24 @@ func parseTWDate(raw string) (time.Time, bool) {
 		"20060102",          // yyyymmdd       (8 dígitos)
 	}
 	for _, l := range layouts {
-		if t, err := time.Parse(l, raw); err == nil {
+		if t, err := time.ParseInLocation(l, raw, time.UTC); err == nil {
 			return t, true
 		}
 	}
 	return time.Time{}, false
 }
 
+// formatISO8601 formatea un time.Time en RFC3339 con offset, p.ej. "2025-06-05T15:10:00-05:00".
+func formatISO8601(t time.Time) string {
+	// Si t es cero, usamos la hora actual
+	if t.IsZero() {
+		return time.Now().Format("2006-01-02T15:04:05-07:00")
+	}
+	return t.Format("2006-01-02T15:04:05-07:00")
+}
+
 // -----------------------------------------------------------------------------
-// 3. Detección de lenguaje por extensión de archivo (solo para tiddlers de código)
+// Versión 1 – lógica intacta (esquema heredado)
 // -----------------------------------------------------------------------------
 
 // detectLanguageByExtension recibe un nombre de archivo (p.ej. "foo.go")
@@ -108,7 +116,7 @@ func detectLanguageByExtension(filename string) string {
 }
 
 // -----------------------------------------------------------------------------
-// 4. ConvertTiddlersV3 – la función principal de conversión
+// Versión 2 – esquema meta/content (AI-friendly)
 // -----------------------------------------------------------------------------
 
 // ConvertTiddlersV3 recorre cada models.Tiddler y genera un models.RecordV2,
@@ -213,6 +221,10 @@ func ConvertTiddlersV3(ts []models.Tiddler) []models.RecordV2 {
 				// lo dejamos en Plain sin más
 				content.Plain = t.Text
 			}
+		case "text/x-markdown":
+			content.Markdown = t.Text
+		default:
+			content.Plain = t.Text
 		}
 
 		// ---------------------------------------------------------------------
@@ -220,13 +232,71 @@ func ConvertTiddlersV3(ts []models.Tiddler) []models.RecordV2 {
 		// ---------------------------------------------------------------------
 		rec := models.RecordV2{
 			ID:        t.Title,
-			Type:      recType,
+			Type:      "tiddler",
 			Meta:      meta,
 			Content:   content,
-			Relations: nil, // Por ahora no implementamos relaciones en v3
+			Relations: nil,
 		}
 		recs = append(recs, rec)
 	}
+	return recs
+}
 
+// -----------------------------------------------------------------------------
+// Versión 3 – esquema mínimo para JSONL estricto (una línea por objeto)
+// -----------------------------------------------------------------------------
+
+// ConvertTiddlersV3 recibe []models.Tiddler y devuelve []map[string]any
+// donde cada map corresponde a un JSON plano sin saltos de línea internos.
+// Campos incluidos:
+//   - "id", "title": ambos iguales a t.Title
+//   - "created", "modified": ISO8601 con zona, o ahora si no se parsea
+//   - "tags": []string (de parseTags)
+//   - "tmap.id": string
+//   - "relations": map[string][]string (si aplica; aquí nil)
+//   - "type": t.Type
+//   - "text": t.Text (plano o markdown)
+//
+// No se duplica tags en otro nivel. Ideal para JSONL.
+func ConvertTiddlersV3(ts []models.Tiddler) []map[string]any {
+	recs := make([]map[string]any, 0, len(ts))
+
+	for _, t := range ts {
+		// 1) Fechas en time.Time
+		createdTime, okC := parseTWDate(t.Created)
+		modifiedTime, okM := parseTWDate(t.Modified)
+
+		// 2) Formatear fechas a string ISO8601
+		createdStr := formatISO8601(createdTime)
+		if !okC {
+			// Si parse falló, usamos ahora
+			createdStr = formatISO8601(time.Now())
+		}
+		modifiedStr := formatISO8601(modifiedTime)
+		if !okM {
+			modifiedStr = formatISO8601(time.Now())
+		}
+
+		// 3) Extraer tags
+		tags := parseTags(t.Tags)
+
+		// 4) Construir el objeto JSON mínimo
+		obj := map[string]any{
+			"id":       t.Title,
+			"title":    t.Title,
+			"created":  createdStr,
+			"modified": modifiedStr,
+			"tags":     tags,
+			"tmap.id":  t.TmapID,
+			"type":     t.Type,
+			"text":     t.Text,
+		}
+
+		// 5) Si tu modelo Tiddler incluyera relaciones explícitas,
+		// podrías agregarlas así (aquí se deja como nil/simplemente no se incluye):
+		// obj["relations"] = map[string][]string{ ... }
+
+		recs = append(recs, obj)
+	}
 	return recs
 }
