@@ -21,12 +21,12 @@ import (
 // ----------------------------- parseTags -----------------------------
 // Test_parseTags comprueba la extracción de etiquetas, incluyendo espacios.
 func Test_parseTags(t *testing.T) {
-	raw := "[[foo]] [[bar baz]] [[123]]"
-	want := []string{"foo", "bar baz", "123"}
+	raw := "[[tag1]] [[tag 2]] [[tag3]]"
+	want := []string{"tag1", "tag 2", "tag3"}
 
 	got := parseTags(raw)
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("parseTags(%q) = %v; queríamos %v", raw, got, want)
+		t.Errorf("parseTags(%q) = %v, want %v", raw, got, want)
 	}
 }
 

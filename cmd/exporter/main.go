@@ -54,7 +54,7 @@ func main() {
 	// 3) Resolver input (archivo o directorio)
 	fi, err := os.Stat(*in)
 	if err != nil {
-		log.Fatalf("❌ Error leyendo tiddlers desde '%s': %v", *inPath, err)
+		log.Fatalf("❌ no se pudo acceder a '%s': %v", *in, err)
 	}
 	if fi.IsDir() {
 		files, err := os.ReadDir(*in)
@@ -90,7 +90,7 @@ func main() {
 	// 5) Leer tiddlers
 	tiddlers, err := importer.Read(ctx, *in)
 	if err != nil {
-		log.Fatalf("❌ No se pudo inicializar deduplicador: %v", err)
+		log.Fatalf("❌ error leyendo tiddlers: %v", err)
 	}
 	fmt.Printf("📦 %d tiddlers cargados\n", len(tiddlers))
 
