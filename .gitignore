@@ -179,8 +179,13 @@ estructura.txt
 # Exportador de repositorio
 rep-export-LINUX/
 
-# In
-.data/in/tiddlers.json
+# Ignorar carpetas específicas
+data/in/
+data/out/
 
-# Out
-.data/out/tiddlers.jsonl
+# Ignorar toda la carpeta data
+data/
+
+# Ignorar binario o carpeta de build
+rep-export-LINUX/
+
