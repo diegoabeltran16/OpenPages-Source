@@ -44,9 +44,8 @@ type Content struct {
 }
 
 type Section struct {
-	Level   int    `json:"level"`
-	Heading string `json:"heading"`
-	Text    string `json:"text"`
+	Name     string `json:"name"`
+	RawValue string `json:"value"`
 }
 
 type Meta struct {
