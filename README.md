@@ -2,10 +2,10 @@
 
 Convierte una exportación **JSON** de *TiddlyWiki* en formatos **JSONL** o **JSON** listos para ingestión por:
 
--➡️ Modelos de lenguaje (LLMs)
--➡️ Pipelines de IA o ETL
--➡️ Dashboards de conocimiento
--➡️ Buscadores semánticos o clasificadores automáticos
+- Modelos de lenguaje (LLMs)
+- Pipelines de IA o ETL
+- Dashboards de conocimiento
+- Buscadores semánticos o clasificadores automáticos
 
 La herramienta preserva la semántica de cada *tiddler* (título, tags, fechas, color, relaciones) y ofrece **tres modos** de salida:
 
