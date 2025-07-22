@@ -211,3 +211,6 @@ func ConvertTiddlersV3(ts []models.Tiddler) []map[string]any {
 	}
 	return recs
 }
+
+// ELIMINAR: La función ReverseJSONLToTiddlyJSON que estaba aquí
+// Ahora está en reverse.go como archivo separado

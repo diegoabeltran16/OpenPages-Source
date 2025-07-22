@@ -187,5 +187,6 @@ data/out/
 data/
 
 # Ignorar binario o carpeta de build
-rep-export-LINUX/
+rep_export_Windows/
+
 

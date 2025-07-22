@@ -43,9 +43,66 @@ func main() {
 	out := flag.String("output", "", "Ruta de salida: archivo .jsonl o carpeta (requerido)")
 	mode := flag.String("mode", "v1", "Modo de conversión: v1 (plano) | v2 (meta/content) | v3 (JSONL mínimo)")
 	pretty := flag.Bool("pretty", false, "Usar indentación en lugar de JSONL compacto")
+	reverse := flag.Bool("reverse", false, "Revertir JSONL enriquecido a JSON TiddlyWiki")
+	reverseSingle := flag.Bool("reverse-single", false, "Revertir solo el tiddler raíz a objeto único")
+	rootTitle := flag.String("root-title", "_____Nombre del Proyecto", "Título del tiddler raíz para reversión")
+	updateTexts := flag.Bool("update-texts", false, "Actualizar solo los campos 'text' y 'modified' en la plantilla usando otro archivo")
 	flag.Parse()
 
-	// 2) Validar obligatorio
+	// **NUEVO: Actualizar texts en plantilla**
+	if *updateTexts {
+		if *in == "" || *out == "" {
+			fmt.Println("Uso: exporter -update-texts -input plantilla.json -output destino.json -updates actualizaciones.json")
+			os.Exit(1)
+		}
+		updatesPath := flag.Lookup("updates")
+		if updatesPath == nil || updatesPath.Value.String() == "" {
+			fmt.Println("Falta el flag -updates con el archivo de actualizaciones")
+			os.Exit(1)
+		}
+		template, err := importer.Read(ctx, *in)
+		if err != nil {
+			log.Fatalf("❌ error leyendo plantilla: %v", err)
+		}
+		updates, err := importer.Read(ctx, updatesPath.Value.String())
+		if err != nil {
+			log.Fatalf("❌ error leyendo actualizaciones: %v", err)
+		}
+		result := transform.UpdateTexts(template, updates)
+		if err := exporter.WriteJSON(*out, result, *pretty); err != nil {
+			log.Fatalf("❌ error escribiendo resultado: %v", err)
+		}
+		fmt.Printf("✅ Actualización de texts completada (destino: %s)\n", *out)
+		return
+	}
+
+	// **NUEVO: Modo reversa objeto único**
+	if *reverseSingle {
+		if *in == "" || *out == "" {
+			fmt.Println("Uso: exporter -reverse-single -input archivo.json -output destino.json -root-title \"_____Nombre del Proyecto\"")
+			os.Exit(1)
+		}
+		if err := exporter.RevertToSingleTiddler(ctx, *in, *out, *rootTitle); err != nil {
+			log.Fatalf("❌ error en reversa objeto único: %v", err)
+		}
+		fmt.Printf("✅ Reversión objeto único completada (destino: %s)\n", *out)
+		return
+	}
+
+	// **NUEVO: Modo reversa array**
+	if *reverse {
+		if *in == "" || *out == "" {
+			fmt.Println("Uso: exporter -reverse -input archivo.jsonl -output destino.json")
+			os.Exit(1)
+		}
+		if err := transform.ReverseJSONLToTiddlyJSON(*in, *out); err != nil {
+			log.Fatalf("❌ error en reversa: %v", err)
+		}
+		fmt.Printf("✅ Reversión completada (destino: %s)\n", *out)
+		return
+	}
+
+	// 2) Validar obligatorio para modo normal
 	if *in == "" || *out == "" {
 		fmt.Println("Uso: exporter -input origen.json|carpeta -output destino.jsonl|carpeta [-mode v2|v3] [-pretty]")
 		os.Exit(1)
@@ -63,14 +120,14 @@ func main() {
 		}
 		found := false
 		for _, f := range files {
-			if !f.IsDir() && filepath.Ext(f.Name()) == ".json" {
+			if !f.IsDir() {
 				*in = filepath.Join(*in, f.Name())
 				found = true
 				break
 			}
 		}
 		if !found {
-			log.Fatalf("❌ no se encontró ningún .json en '%s'", *in)
+			log.Fatalf("❌ no se encontró ningún archivo en '%s'", *in)
 		}
 	}
 
