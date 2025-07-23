@@ -24,7 +24,8 @@ type Tiddler struct {
 	Modified    string                 `json:"modified"`
 	Color       string                 `json:"color,omitempty"`
 	TmapID      string                 `json:"tmap.id,omitempty"`
-	ExtraFields map[string]interface{} `json:"-"` // No se serializa automáticamente
+	ExtraFields map[string]interface{} `json:"-"`                   // No se serializa automáticamente
+	Relations   []string               `json:"relations,omitempty"` // Campo para relaciones
 }
 
 // UnmarshalJSON implementa unmarshaling personalizado para capturar campos dinámicos

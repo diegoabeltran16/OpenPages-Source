@@ -26,3 +26,18 @@ func WriteJSON(outputPath string, v any, pretty bool) error {
 	}
 	return nil
 }
+
+func ExportToJSONL(tiddlers []Tiddler, outPath string) error {
+	f, err := os.Create(outPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	enc := json.NewEncoder(f)
+	for _, t := range tiddlers {
+		if err := enc.Encode(t); err != nil {
+			return err
+		}
+	}
+	return nil
+}
