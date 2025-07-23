@@ -2,18 +2,22 @@ package main
 
 import (
 	"log"
+	"os"
 
 	"github.com/diegoabeltran16/OpenPages-Source/internal/exporter"
 )
 
 func main() {
-	err := exporter.CloneAndUpdateTexts(
-		"data/in/Plantilla (Estudiar OpenPages).json", // plantilla original
-		"data/out/tiddlers.jsonl",                     // textos nuevos
-		"data/in/tiddlers_revert.json",                // salida clonada y actualizada
-	)
+	if len(os.Args) != 4 {
+		log.Fatalf("Uso: revert <plantilla.json> <textos.jsonl> <salida.json>")
+	}
+	plantilla := os.Args[1]
+	textos := os.Args[2]
+	salida := os.Args[3]
+
+	err := exporter.CloneAndUpdateTexts(plantilla, textos, salida)
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Println("✅ Proceso completado: tiddlers_revert.json actualizado con textos desde JSONL")
+	log.Printf("✅ Proceso completado: %s actualizado con textos desde %s", salida, textos)
 }

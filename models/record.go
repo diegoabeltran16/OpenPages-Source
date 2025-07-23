@@ -64,3 +64,22 @@ type RecordV2 struct {
 	Content   Content             `json:"content"`
 	Relations map[string][]string `json:"relations,omitempty"`
 }
+
+// -----------------------------------------------------------------------------
+// VERSIÓN HÍBRIDA – Para compatibilidad hacia adelante
+// -----------------------------------------------------------------------------
+// Estructura que combina elementos de v1 y v2 para facilitar la migración.
+
+type RecordHybrid struct {
+	ID        string                 `json:"id"`
+	Title     string                 `json:"title"`
+	Created   string                 `json:"created"`
+	Modified  string                 `json:"modified"`
+	Tags      []string               `json:"tags"`
+	Type      string                 `json:"type"`
+	Text      string                 `json:"text"`
+	TmapID    string                 `json:"tmap.id"`
+	Meta      map[string]interface{} `json:"meta,omitempty"`
+	Content   map[string]interface{} `json:"content,omitempty"`
+	Relations map[string]interface{} `json:"relations,omitempty"`
+}

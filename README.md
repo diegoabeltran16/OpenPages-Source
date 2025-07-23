@@ -5,16 +5,19 @@ Convierte una exportación **JSON** de *TiddlyWiki* en formatos **JSONL** o **JS
 - Modelos de lenguaje (LLMs)
 - Pipelines de IA o ETL
 - Dashboards de conocimiento
-- Buscadores semánticos o clasificadores automáticos
+- Buscadores semánticos, clasificadores automáticos o motores RAG
 
-La herramienta preserva la semántica de cada *tiddler* (título, tags, fechas, color, relaciones) y ofrece **tres modos** de salida:
+La herramienta preserva la semántica de cada *tiddler* (título, tags, fechas, color, relaciones) y ofrece **tres modos** de salida, priorizando compatibilidad con sistemas de gran escala y pipelines de IA:
 
-| Modo | Esquema | Pensado para… | Formato       |
-|------|---------|---------------|---------------|
-| `v1` | **Compacto heredado**<br>TextPlain / TextMarkdown | Back-compat con scripts antiguos | JSONL |
-| `v2` | **Meta + Content**<br>`models.RecordV2` | LLMs que requieran contexto rico | JSONL / JSON |
-| `v3` | **Minimal JSONL**<br>una línea = un objeto ligero | Spark, BigQuery, Elasticsearch | JSONL |
+| Modo   | Esquema                                              | Pensado para…                                   | Formato         |
+|--------|------------------------------------------------------|-------------------------------------------------|-----------------|
+| `v2`   | **Meta + Content**<br>`models.RecordV2`              | LLMs, RAG, BigQuery, Spark, ingestión masiva    | JSONL / JSON    |
+| `hybrid` | **10 claves ricas por entrada**<br>texto claro     | LLMs, RAG, análisis semántico                   | JSONL           |
+| `v1`   | **Compacto heredado**<br>TextPlain / TextMarkdown    | Scripts antiguos, pruebas semánticas, embedding | JSONL           |
+| `v2_pretty` | **Meta + Content (multilínea, inspección)**     | Revisión visual, limpieza previa a ingestión    | JSON (pretty)   |
+| `v1_pretty` | **Compacto heredado (multilínea, escapado)**    | Inspección humana, requiere preprocesamiento    | JSON (pretty)   |
 
+> **Nota:** Los modos `pretty` no son JSONL estricto, pero pueden limpiarse fácilmente para ingestión automática. El modo `v2` es el recomendado para sistemas de IA y pipelines modernos.
 
 ## 🧱 Componentes
 
@@ -24,8 +27,8 @@ La herramienta preserva la semántica de cada *tiddler* (título, tags, fechas, 
 
 ### Salida
 
-- Un archivo `.jsonl` válido (una línea por entrada).
-- O un archivo `.json` indentado (solo para inspección humana).
+- Archivos `.jsonl` válido (una línea por entrada).
+- O un archivo `.jsonl` indentado (solo para inspección humana)(formato pretty).
 
 ---
 

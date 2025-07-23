@@ -116,5 +116,5 @@ func WriteJSONL(ctx context.Context, path string, records any, pretty bool) (err
 		return fmt.Errorf("flush: %w", err)
 	}
 
-	return nil
+	return
 }

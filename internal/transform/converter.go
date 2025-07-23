@@ -212,5 +212,25 @@ func ConvertTiddlersV3(ts []models.Tiddler) []map[string]any {
 	return recs
 }
 
+// ConvertTiddlersHybrid genera un slice de objetos planos ideales para IA/RAG.
+// Incluye campos raíz y bloques meta/content/relations planos, sin duplicados.
+func ConvertTiddlersHybrid(ts []models.Tiddler) []models.Record {
+	recs := make([]models.Record, 0, len(ts))
+	for _, t := range ts {
+		rec := models.Record{
+			ID:           t.Title,
+			Tags:         parseTags(t.Tags),
+			ContentType:  t.Type,
+			TextMarkdown: t.Text,
+			TextPlain:    t.Text,
+			CreatedAt:    t.Created,
+			ModifiedAt:   t.Modified,
+			Color:        t.Color,
+		}
+		recs = append(recs, rec)
+	}
+	return recs
+}
+
 // ELIMINAR: La función ReverseJSONLToTiddlyJSON que estaba aquí
 // Ahora está en reverse.go como archivo separado
