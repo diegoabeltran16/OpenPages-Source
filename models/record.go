@@ -13,7 +13,10 @@
 
 package models
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // -----------------------------------------------------------------------------
 // VERSIÓN 1 – Compacta (heredada)
@@ -63,6 +66,33 @@ type RecordV2 struct {
 	Meta      Meta                `json:"meta"`
 	Content   Content             `json:"content"`
 	Relations map[string][]string `json:"relations,omitempty"`
+}
+
+// FlattenTags convierte el slice de tags en un string separado por coma.
+func (r RecordV2) FlattenTags() string {
+	if len(r.Meta.Tags) == 0 {
+		return ""
+	}
+	return strings.Join(r.Meta.Tags, ",")
+}
+
+// FlattenRelations devuelve las relaciones "define" y "requiere" como strings separados por coma.
+func (r RecordV2) FlattenRelations() (define string, requiere string) {
+	if r.Relations == nil {
+		return "", ""
+	}
+	if def, ok := r.Relations["define"]; ok && len(def) > 0 {
+		define = strings.Join(def, ",")
+	}
+	if req, ok := r.Relations["requiere"]; ok && len(req) > 0 {
+		requiere = strings.Join(req, ",")
+	}
+	return
+}
+
+// IsAIReady retorna true si el registro tiene los campos clave para IA.
+func (r RecordV2) IsAIReady() bool {
+	return r.ID != "" && r.Type != "" && r.Content.Plain != ""
 }
 
 // -----------------------------------------------------------------------------

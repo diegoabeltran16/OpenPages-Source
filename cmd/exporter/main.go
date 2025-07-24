@@ -23,12 +23,14 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/diegoabeltran16/OpenPages-Source/internal/exporter"
 	"github.com/diegoabeltran16/OpenPages-Source/internal/importer"
@@ -50,161 +52,210 @@ func main() {
 	updates := flag.String("updates", "", "Archivo JSONL con actualizaciones de textos (para -update-texts)")
 	flag.Parse()
 
-	// 2) Modos especiales
-	if *updateTexts {
-		if *in == "" || *out == "" || *updates == "" {
-			fmt.Println("Uso: exporter -update-texts -input plantilla.json -output destino.json -updates actualizaciones.json")
-			os.Exit(1)
-		}
-		template, err := importer.Read(ctx, *in)
+	switch *mode {
+	case "export-parquet", "parquet":
+		fmt.Println("--------------------------------------------------")
+		fmt.Println("📦 Modo: Exportación interactiva de JSONL a Parquet")
+		outDir := "data/out"
+		files, err := os.ReadDir(outDir)
 		if err != nil {
-			log.Fatalf("❌ error leyendo plantilla: %v", err)
+			log.Fatalf("❌ No se pudo leer el directorio %s: %v", outDir, err)
 		}
-		updatesData, err := importer.Read(ctx, *updates)
-		if err != nil {
-			log.Fatalf("❌ error leyendo actualizaciones: %v", err)
-		}
-		result := transform.UpdateTexts(template, updatesData)
-		if err := exporter.WriteJSON(*out, result, *pretty); err != nil {
-			log.Fatalf("❌ error escribiendo resultado: %v", err)
-		}
-		fmt.Printf("✅ Actualización de texts completada (destino: %s)\n", *out)
-		return
-	}
-
-	if *reverseSingle {
-		if *in == "" || *out == "" {
-			fmt.Println("Uso: exporter -reverse-single -input archivo.json -output destino.json -root-title \"_____Nombre del Proyecto\"")
-			os.Exit(1)
-		}
-		if err := exporter.RevertToSingleTiddler(ctx, *in, *out, *rootTitle); err != nil {
-			log.Fatalf("❌ error en reversa objeto único: %v", err)
-		}
-		fmt.Printf("✅ Reversión objeto único completada (destino: %s)\n", *out)
-		return
-	}
-
-	if *reverse {
-		if *in == "" || *out == "" {
-			fmt.Println("Uso: exporter -reverse -input archivo.jsonl -output destino.json")
-			os.Exit(1)
-		}
-		if err := transform.ReverseJSONLToTiddlyJSON(*in, *out); err != nil {
-			log.Fatalf("❌ error en reversa: %v", err)
-		}
-		fmt.Printf("✅ Reversión completada (destino: %s)\n", *out)
-		return
-	}
-
-	// 3) Validar flags obligatorios
-	if *in == "" || *out == "" {
-		fmt.Println("Uso: exporter -input origen.json|carpeta -output destino.jsonl|carpeta [-mode v1|v2|v3|hybrid] [-pretty]")
-		os.Exit(1)
-	}
-
-	// 4) Resolver input (archivo o directorio)
-	fi, err := os.Stat(*in)
-	if err != nil {
-		log.Fatalf("❌ no se pudo acceder a '%s': %v", *in, err)
-	}
-	if fi.IsDir() {
-		files, err := os.ReadDir(*in)
-		if err != nil {
-			log.Fatalf("❌ no se pudo listar '%s': %v", *in, err)
-		}
-		found := false
+		var jsonlFiles []string
 		for _, f := range files {
-			if !f.IsDir() {
-				*in = filepath.Join(*in, f.Name())
-				found = true
+			if !f.IsDir() && strings.HasSuffix(f.Name(), ".jsonl") {
+				jsonlFiles = append(jsonlFiles, f.Name())
+			}
+		}
+		if len(jsonlFiles) == 0 {
+			log.Fatalf("❌ No se encontraron archivos .jsonl en %s", outDir)
+		}
+		fmt.Println("Seleccione el archivo .jsonl a convertir a .parquet:")
+		for i, name := range jsonlFiles {
+			fmt.Printf("  [%d] %s\n", i+1, name)
+		}
+		fmt.Print("Ingrese el número de archivo: ")
+		reader := bufio.NewReader(os.Stdin)
+		var idx int
+		for {
+			input, _ := reader.ReadString('\n')
+			input = strings.TrimSpace(input)
+			fmt.Sscanf(input, "%d", &idx)
+			if idx >= 1 && idx <= len(jsonlFiles) {
 				break
 			}
+			fmt.Print("Opción inválida. Intente de nuevo: ")
 		}
-		if !found {
-			log.Fatalf("❌ no se encontró ningún archivo en '%s'", *in)
+		selected := jsonlFiles[idx-1]
+		inputPath := filepath.Join(outDir, selected)
+		outputPath := strings.TrimSuffix(inputPath, ".jsonl") + ".parquet"
+		fmt.Printf("Convirtiendo %s → %s ...\n", inputPath, outputPath)
+		if err := exporter.ConvertJSONLToParquet(inputPath, outputPath); err != nil {
+			log.Fatalf("❌ Error exportando a Parquet: %v", err)
 		}
-	}
+		fmt.Printf("✅ Conversión a Parquet completada: %s\n", outputPath)
+		return
 
-	// 5) Resolver output (archivo o carpeta)
-	fo, err := os.Stat(*out)
-	base := filepath.Base(*in)
-	ext := filepath.Ext(base)
-	name := base[:len(base)-len(ext)]
-	prettySuffix := ""
-	if *pretty {
-		prettySuffix = "_pretty"
-	}
-	if (err == nil && fo.IsDir()) || (os.IsNotExist(err) && filepath.Ext(*out) == "") {
-		if os.IsNotExist(err) {
-			if mkdirErr := os.MkdirAll(*out, 0755); mkdirErr != nil {
-				log.Fatalf("❌ no se pudo crear carpeta '%s': %v", *out, mkdirErr)
+	case "v1", "v2", "v3", "hybrid":
+		// 2) Modos especiales
+		if *updateTexts {
+			if *in == "" || *out == "" || *updates == "" {
+				fmt.Println("Uso: exporter -update-texts -input plantilla.json -output destino.json -updates actualizaciones.json")
+				os.Exit(1)
+			}
+			template, err := importer.Read(ctx, *in)
+			if err != nil {
+				log.Fatalf("❌ error leyendo plantilla: %v", err)
+			}
+			updatesData, err := importer.Read(ctx, *updates)
+			if err != nil {
+				log.Fatalf("❌ error leyendo actualizaciones: %v", err)
+			}
+			result := transform.UpdateTexts(template, updatesData)
+			if err := exporter.WriteJSON(*out, result, *pretty); err != nil {
+				log.Fatalf("❌ error escribiendo resultado: %v", err)
+			}
+			fmt.Printf("✅ Actualización de texts completada (destino: %s)\n", *out)
+			return
+		}
+
+		if *reverseSingle {
+			if *in == "" || *out == "" {
+				fmt.Println("Uso: exporter -reverse-single -input archivo.json -output destino.json -root-title \"_____Nombre del Proyecto\"")
+				os.Exit(1)
+			}
+			if err := exporter.RevertToSingleTiddler(ctx, *in, *out, *rootTitle); err != nil {
+				log.Fatalf("❌ error en reversa objeto único: %v", err)
+			}
+			fmt.Printf("✅ Reversión objeto único completada (destino: %s)\n", *out)
+			return
+		}
+
+		if *reverse {
+			if *in == "" || *out == "" {
+				fmt.Println("Uso: exporter -reverse -input archivo.jsonl -output destino.json")
+				os.Exit(1)
+			}
+			if err := transform.ReverseJSONLToTiddlyJSON(*in, *out); err != nil {
+				log.Fatalf("❌ error en reversa: %v", err)
+			}
+			fmt.Printf("✅ Reversión completada (destino: %s)\n", *out)
+			return
+		}
+
+		// 3) Validar flags obligatorios
+		if *in == "" || *out == "" {
+			fmt.Println("Uso: exporter -input origen.json|carpeta -output destino.jsonl|carpeta [-mode v1|v2|v3|hybrid] [-pretty]")
+			os.Exit(1)
+		}
+
+		// 4) Resolver input (archivo o directorio)
+		fi, err := os.Stat(*in)
+		if err != nil {
+			log.Fatalf("❌ no se pudo acceder a '%s': %v", *in, err)
+		}
+		if fi.IsDir() {
+			files, err := os.ReadDir(*in)
+			if err != nil {
+				log.Fatalf("❌ no se pudo listar '%s': %v", *in, err)
+			}
+			found := false
+			for _, f := range files {
+				if !f.IsDir() {
+					*in = filepath.Join(*in, f.Name())
+					found = true
+					break
+				}
+			}
+			if !found {
+				log.Fatalf("❌ no se encontró ningún archivo en '%s'", *in)
 			}
 		}
-		*out = filepath.Join(*out, fmt.Sprintf("%s_%s%s.jsonl", name, *mode, prettySuffix))
-	} else if filepath.Ext(*out) == ".jsonl" {
-		*out = filepath.Join(filepath.Dir(*out), fmt.Sprintf("%s_%s%s.jsonl", name, *mode, prettySuffix))
-	}
 
-	// 6) Leer tiddlers
-	tiddlers, err := importer.Read(ctx, *in)
-	if err != nil {
-		log.Fatalf("❌ error leyendo tiddlers: %v", err)
-	}
-	fmt.Printf("📦 %d tiddlers cargados\n", len(tiddlers))
-
-	// 7) Convertir y exportar según modo
-	fmt.Println("--------------------------------------------------")
-	fmt.Printf("🧠 Modo de exportación seleccionado: %s\n", *mode)
-	switch *mode {
-	case "v1":
-		fmt.Println("  - Compacto heredado (TextPlain/TextMarkdown)")
-	case "v2":
-		fmt.Println("  - Meta + Content (AI-friendly, contexto rico)")
-	case "v3":
-		fmt.Println("  - Minimal JSONL (una línea por objeto, ideal para IA)")
-	case "hybrid":
-		fmt.Println("  - Híbrido (estructura extendida para IA/RAG)")
-	default:
-		fmt.Println("  - Modo desconocido")
-	}
-	fmt.Printf("📦 Formato de salida: %s\n", func() string {
+		// 5) Resolver output (archivo o carpeta)
+		fo, err := os.Stat(*out)
+		base := filepath.Base(*in)
+		ext := filepath.Ext(base)
+		name := base[:len(base)-len(ext)]
+		prettySuffix := ""
 		if *pretty {
-			return "JSON indentado (multilínea, inspección humana)"
+			prettySuffix = "_pretty"
 		}
-		return "JSONL plano (una línea por objeto, ingestión IA)"
-	}())
-	fmt.Printf("📥 Archivo de entrada: %s\n", *in)
-	fmt.Printf("📤 Archivo de salida:  %s\n", *out)
-	fmt.Println("--------------------------------------------------")
-
-	switch *mode {
-	case "hybrid":
-		recs := transform.ConvertTiddlersHybrid(tiddlers)
-		if err := exporter.WriteJSONL(ctx, *out, recs, *pretty); err != nil {
-			log.Fatalf("❌ escribir JSONL hybrid: %v", err)
+		if (err == nil && fo.IsDir()) || (os.IsNotExist(err) && filepath.Ext(*out) == "") {
+			if os.IsNotExist(err) {
+				if mkdirErr := os.MkdirAll(*out, 0755); mkdirErr != nil {
+					log.Fatalf("❌ no se pudo crear carpeta '%s': %v", *out, mkdirErr)
+				}
+			}
+			*out = filepath.Join(*out, fmt.Sprintf("%s_%s%s.jsonl", name, *mode, prettySuffix))
+		} else if filepath.Ext(*out) == ".jsonl" {
+			*out = filepath.Join(filepath.Dir(*out), fmt.Sprintf("%s_%s%s.jsonl", name, *mode, prettySuffix))
 		}
 
-	case "v3":
-		recs := transform.ConvertTiddlersV3(tiddlers)
-		if err := exporter.WriteJSONL(ctx, *out, recs, *pretty); err != nil {
-			log.Fatalf("❌ escribir JSONL v3: %v", err)
+		// 6) Leer tiddlers
+		tiddlers, err := importer.Read(ctx, *in)
+		if err != nil {
+			log.Fatalf("❌ error leyendo tiddlers: %v", err)
+		}
+		fmt.Printf("📦 %d tiddlers cargados\n", len(tiddlers))
+
+		// 7) Convertir y exportar según modo
+		fmt.Println("--------------------------------------------------")
+		fmt.Printf("🧠 Modo de exportación seleccionado: %s\n", *mode)
+		switch *mode {
+		case "v1":
+			fmt.Println("  - Compacto heredado (TextPlain/TextMarkdown)")
+		case "v2":
+			fmt.Println("  - Meta + Content (AI-friendly, contexto rico)")
+		case "v3":
+			fmt.Println("  - Minimal JSONL (una línea por objeto, ideal para IA)")
+		case "hybrid":
+			fmt.Println("  - Híbrido (estructura extendida para IA/RAG)")
+		default:
+			fmt.Println("  - Modo desconocido")
+		}
+		fmt.Printf("📦 Formato de salida: %s\n", func() string {
+			if *pretty {
+				return "JSON indentado (multilínea, inspección humana)"
+			}
+			return "JSONL plano (una línea por objeto, ingestión IA)"
+		}())
+		fmt.Printf("📥 Archivo de entrada: %s\n", *in)
+		fmt.Printf("📤 Archivo de salida:  %s\n", *out)
+		fmt.Println("--------------------------------------------------")
+
+		switch *mode {
+		case "hybrid":
+			recs := transform.ConvertTiddlersHybrid(tiddlers)
+			if err := exporter.WriteJSONL(ctx, *out, recs, *pretty); err != nil {
+				log.Fatalf("❌ escribir JSONL hybrid: %v", err)
+			}
+
+		case "v3":
+			recs := transform.ConvertTiddlersV3(tiddlers)
+			if err := exporter.WriteJSONL(ctx, *out, recs, *pretty); err != nil {
+				log.Fatalf("❌ escribir JSONL v3: %v", err)
+			}
+
+		case "v2":
+			recs := transform.ConvertTiddlersV2(tiddlers)
+			if err := exporter.WriteJSONL(ctx, *out, recs, *pretty); err != nil {
+				log.Fatalf("❌ escribir JSONL v2: %v", err)
+			}
+
+		case "v1":
+			recs := transform.ConvertTiddlers(tiddlers)
+			if err := exporter.WriteJSONL(ctx, *out, recs, *pretty); err != nil {
+				log.Fatalf("❌ escribir JSONL v1: %v", err)
+			}
+
+		default:
+			log.Fatalf("❌ modo desconocido: %s (usa 'v1', 'v2', 'v3' o 'hybrid')", *mode)
 		}
 
-	case "v2":
-		recs := transform.ConvertTiddlersV2(tiddlers)
-		if err := exporter.WriteJSONL(ctx, *out, recs, *pretty); err != nil {
-			log.Fatalf("❌ escribir JSONL v2: %v", err)
-		}
-
-	case "v1":
-		recs := transform.ConvertTiddlers(tiddlers)
-		if err := exporter.WriteJSONL(ctx, *out, recs, *pretty); err != nil {
-			log.Fatalf("❌ escribir JSONL v1: %v", err)
-		}
+		fmt.Printf("✅ Exportación completada (destino: %s)\n", *out)
 
 	default:
-		log.Fatalf("❌ modo desconocido: %s (usa 'v1', 'v2', 'v3' o 'hybrid')", *mode)
+		log.Fatalf("❌ modo desconocido: %s (usa 'v1', 'v2', 'v3', 'hybrid', 'parquet' o 'export-parquet')", *mode)
 	}
-
-	fmt.Printf("✅ Exportación completada (destino: %s)\n", *out)
 }
