@@ -27,6 +27,7 @@ echo ==========================================
 echo [1] Exportar tiddlers desde plantilla
 echo [2] Revertir y actualizar textos desde JSONL
 echo [3] Ejecutar ambos procesos (pipeline completo)
+echo [4] Exportar a .parquet desde .jsonl
 echo [0] Salir
 echo.
 set /p choice=Elige una opcion [0-3]:
@@ -34,6 +35,7 @@ set /p choice=Elige una opcion [0-3]:
 if "%choice%"=="1" goto EXPORT
 if "%choice%"=="2" goto REVERT
 if "%choice%"=="3" goto PIPELINE
+if "%choice%"=="4" goto EXPORT_PARQUET
 if "%choice%"=="0" goto END
 
 echo Opcion invalida. Intenta de nuevo.
@@ -71,17 +73,15 @@ echo Modos de exportacion disponibles:
 echo   [1] v1
 echo   [2] v2
 echo   [3] v3
-echo   [4] hybrid
 set /p sel_mode=Selecciona el modo por número [default: 3]:
 if "%sel_mode%"=="" set sel_mode=3
 
 if "%sel_mode%"=="1" set mode=v1
 if "%sel_mode%"=="2" set mode=v2
 if "%sel_mode%"=="3" set mode=v3
-if "%sel_mode%"=="4" set mode=hybrid
 
 REM Validar selección
-if not "%mode%"=="v1" if not "%mode%"=="v2" if not "%mode%"=="v3" if not "%mode%"=="hybrid" (
+if not "%mode%"=="v1" if not "%mode%"=="v2" if not "%mode%"=="v3" (
     echo Selección de modo inválida.
     pause
     goto MENU
@@ -201,6 +201,47 @@ if errorlevel 1 (
     goto MENU
 )
 echo Pipeline completado correctamente.
+pause
+goto MENU
+
+:EXPORT_PARQUET
+echo.
+REM Listar archivos .jsonl en data\out para selección
+set /a idx=0
+echo Archivos disponibles en data\out:
+for %%f in ("data\out\*.jsonl") do (
+    set /a idx+=1
+    set "file_jsonl[!idx!]=%%f"
+    echo   [!idx!] %%f
+)
+if "%idx%"=="0" (
+    echo No se encontraron archivos .jsonl en data\out.
+    pause
+    goto MENU
+)
+set /p sel_jsonl=Selecciona el archivo .jsonl por número:
+if not defined file_jsonl[%sel_jsonl%] (
+    echo Selección inválida.
+    pause
+    goto MENU
+)
+set input_jsonl=!file_jsonl[%sel_jsonl%]!
+for %%A in ("%input_jsonl%") do (
+    set "output_parquet=data\out\%%~nA.parquet"
+)
+echo.
+echo Parámetros seleccionados:
+echo   Entrada: %input_jsonl%
+echo   Salida:  %output_parquet%
+echo.
+echo Ejecutando conversión a Parquet...
+%EXPORTER_BIN% -input "%input_jsonl%" -output "%output_parquet%" -mode export-parquet
+if errorlevel 1 (
+    echo Error en exportación Parquet. Abortando.
+    pause
+    goto MENU
+)
+echo Exportación Parquet completada.
 pause
 goto MENU
 
