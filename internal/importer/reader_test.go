@@ -39,12 +39,26 @@ func writeTempFile(t *testing.T, content string) string {
 	return f.Name()
 }
 
+// normalizaTiddler asegura que los campos opcionales no sean nil sino vacíos
+func normalizaTiddler(t *models.Tiddler) {
+	if t.Relations == nil {
+		t.Relations = map[string]interface{}{}
+	}
+	if t.Content == nil {
+		t.Content = map[string]interface{}{}
+	}
+	if t.ExtraFields == nil {
+		t.ExtraFields = map[string]interface{}{}
+	}
+	if t.TagsList == nil {
+		t.TagsList = []string{}
+	}
+}
+
 // TestRead_Array verifica la ruta feliz cuando el JSON es un array.
 func TestRead_Array(t *testing.T) {
 	// Arrange
-	jsonData := `[
-      {"title":"Foo","text":"txt","type":"text/plain","tags":"[[a]]","created":"20250101","modified":"20250102"}
-    ]`
+	jsonData := `[{"title":"Foo","text":"txt","type":"text/plain","tags":"[[a]]","created":"20250101","modified":"20250102"}]`
 	path := writeTempFile(t, jsonData)
 	defer os.Remove(path)
 
@@ -61,6 +75,14 @@ func TestRead_Array(t *testing.T) {
 	got, err := Read(context.Background(), path)
 	if err != nil {
 		t.Fatalf("Read(array) devolvió error: %v", err)
+	}
+
+	// Normaliza antes de comparar
+	for i := range got {
+		normalizaTiddler(&got[i])
+	}
+	for i := range want {
+		normalizaTiddler(&want[i])
 	}
 
 	// Assert
@@ -88,6 +110,15 @@ func TestRead_Map(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read(map) devolvió error: %v", err)
 	}
+
+	// Normaliza antes de comparar
+	for i := range got {
+		normalizaTiddler(&got[i])
+	}
+	for i := range want {
+		normalizaTiddler(&want[i])
+	}
+
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Read(map) = %+v, want %+v", got, want)
 	}

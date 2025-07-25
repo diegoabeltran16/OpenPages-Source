@@ -300,10 +300,10 @@ func ConvertTiddlersV3(ts []models.Tiddler) []map[string]any {
 		obj := map[string]any{
 			"id":           t.Title,
 			"title":        t.Title,
-			"created":      orEmpty(created),
-			"created_rfc":  createdStr,
-			"modified":     orEmpty(modified),
-			"modified_rfc": modifiedStr,
+			"created":      createdStr,        // <-- ahora RFC3339
+			"created_raw":  orEmpty(created),  // <-- opcional, el crudo
+			"modified":     modifiedStr,       // <-- ahora RFC3339
+			"modified_raw": orEmpty(modified), // <-- opcional, el crudo
 			"tags":         tags,
 			"tags_list":    tagsList,
 			"tmap.id":      orEmpty(tmapid),
