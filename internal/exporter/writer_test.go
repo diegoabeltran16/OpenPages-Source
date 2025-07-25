@@ -62,8 +62,8 @@ func TestWriteJSONL_V1(t *testing.T) {
 // ----------------------------- caso éxito v2 -----------------------------
 func TestWriteJSONL_V2(t *testing.T) {
 	recs := []models.RecordV2{
-		{ID: "1", Type: "tiddler", Meta: models.Meta{Title: "Hello"}, Content: models.Content{Plain: "hola"}},
-		{ID: "2", Type: "tiddler", Meta: models.Meta{Title: "World"}, Content: models.Content{Plain: "mundo"}},
+		{ID: "1", Type: "tiddler", Meta: models.RecordMeta{Title: "Hello"}, Content: models.Content{Plain: "hola"}},
+		{ID: "2", Type: "tiddler", Meta: models.RecordMeta{Title: "World"}, Content: models.Content{Plain: "mundo"}},
 	}
 	path := tmpPath(t)
 	defer os.Remove(path)

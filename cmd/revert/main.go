@@ -11,11 +11,10 @@ func main() {
 	if len(os.Args) != 4 {
 		log.Fatalf("Uso: revert <plantilla.json> <textos.jsonl> <salida.json>")
 	}
-	plantilla := os.Args[1]
 	textos := os.Args[2]
 	salida := os.Args[3]
 
-	err := exporter.CloneAndUpdateTexts(plantilla, textos, salida)
+	err := exporter.ExportAllFromJSONL(textos, salida)
 	if err != nil {
 		log.Fatal(err)
 	}

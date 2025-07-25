@@ -163,6 +163,23 @@ func recordToTiddler(record map[string]any) (models.Tiddler, error) {
 		tiddler.Color = color
 	}
 
+	// Si text es JSON, deserializar y reinyectar campos
+	if text, ok := record["text"].(string); ok {
+		tiddler.Text = text
+		if looksLikeJSON(text) {
+			var inner map[string]any
+			if err := json.Unmarshal([]byte(text), &inner); err == nil {
+				// Ejemplo: si quieres reinyectar "content.plain" como texto plano
+				if content, ok := inner["content"].(map[string]any); ok {
+					if plain, ok := content["plain"].(string); ok {
+						tiddler.Text = plain
+					}
+				}
+				// Puedes mapear otros campos si lo deseas
+			}
+		}
+	}
+
 	return tiddler, nil
 }
 
@@ -184,4 +201,70 @@ func parseRFC3339ToTW(rfc3339Str string) (string, error) {
 	}
 
 	return "", fmt.Errorf("formato de fecha no reconocido: %s", rfc3339Str)
+}
+
+func RestoreTiddlerWrapper(original models.Tiddler, newPlain string, newMarkdown string) models.Tiddler {
+	if looksLikeJSON(original.Text) {
+		var wrapper map[string]interface{}
+		if err := json.Unmarshal([]byte(original.Text), &wrapper); err == nil {
+			content, _ := wrapper["content"].(map[string]interface{})
+			if content == nil {
+				content = make(map[string]interface{})
+			}
+			if newPlain != "" {
+				content["plain"] = newPlain
+			}
+			if newMarkdown != "" {
+				content["markdown"] = newMarkdown
+			}
+			wrapper["content"] = content
+			b, _ := json.MarshalIndent(wrapper, "", "  ")
+			original.Text = string(b)
+			return original
+		}
+	}
+	// Si no era wrapper, solo reemplaza el texto
+	original.Text = newPlain
+	return original
+}
+
+func looksLikeJSON(s string) bool {
+	s = strings.TrimSpace(s)
+	return strings.HasPrefix(s, "{") && strings.HasSuffix(s, "}")
+}
+
+func ReverseTiddlyJSONToJSONL(inputPath, outputPath string) error {
+	file, err := os.Open(inputPath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	// Detectar si es array JSON
+	buf := make([]byte, 1)
+	if _, err := file.Read(buf); err != nil {
+		return err
+	}
+	file.Seek(0, 0) // Reset
+
+	var tiddlers []map[string]any
+	if buf[0] == '[' {
+		// Es un array JSON
+		if err := json.NewDecoder(file).Decode(&tiddlers); err != nil {
+			return err
+		}
+	} else {
+		// Es JSONL
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			var t map[string]any
+			if err := json.Unmarshal(scanner.Bytes(), &t); err == nil {
+				tiddlers = append(tiddlers, t)
+			}
+		}
+	}
+
+	// Procesar cada tiddler...
+	// ...tu lógica aquí...
+	return nil
 }
