@@ -36,15 +36,30 @@ import (
 var tagRe = regexp.MustCompile(`\[\[([^]]+)\]\]`)
 
 // parseTags extrae todas las etiquetas de la forma [[etiqueta]] de un string.
-func parseTags(raw string) []string {
-	matches := tagRe.FindAllStringSubmatch(raw, -1)
-	tags := make([]string, 0, len(matches))
-	for _, m := range matches {
-		if len(m) > 1 {
-			tags = append(tags, m[1])
+func parseTags(raw any) []string {
+	switch v := raw.(type) {
+	case string:
+		matches := tagRe.FindAllStringSubmatch(v, -1)
+		tags := make([]string, 0, len(matches))
+		for _, m := range matches {
+			if len(m) > 1 {
+				tags = append(tags, m[1])
+			}
 		}
+		return tags
+	case []interface{}:
+		tags := make([]string, 0, len(v))
+		for _, tag := range v {
+			if s, ok := tag.(string); ok {
+				tags = append(tags, s)
+			}
+		}
+		return tags
+	case []string:
+		return v
+	default:
+		return nil
 	}
-	return tags
 }
 
 // parseTWDate intenta parsear un string TiddlyWiki (yyyymmddhhMMSS o yyyymmdd).
@@ -68,6 +83,14 @@ func formatISO8601(t time.Time) string {
 	return t.Format("2006-01-02T15:04:05-07:00")
 }
 
+// orEmpty devuelve el valor o "" si está vacío
+func orEmpty(s string) string {
+	if s == "" {
+		return ""
+	}
+	return s
+}
+
 // -----------------------------------------------------------------------------
 // Versión 1 – lógica intacta (esquema heredado)
 // -----------------------------------------------------------------------------
@@ -76,12 +99,28 @@ func ConvertTiddlers(ts []models.Tiddler) []models.Record {
 	recs := make([]models.Record, 0, len(ts))
 
 	for _, t := range ts {
+		// --- Extracción robusta de campos secundarios ---
+		created := t.Created
+		modified := t.Modified
+		color := t.Color
+
+		// Buscar en Meta si están vacíos
+		if t.Meta != nil {
+			if created == "" {
+				created = t.Meta.Created
+			}
+			if color == "" {
+				color = t.Meta.Color
+			}
+		}
+
 		rec := models.Record{
 			ID:          t.Title,
 			Tags:        parseTags(t.Tags),
 			ContentType: t.Type,
-			CreatedAt:   t.Created,
-			ModifiedAt:  t.Modified,
+			CreatedAt:   created,
+			ModifiedAt:  modified,
+			Color:       color,
 		}
 
 		if t.Type == "application/json" {
@@ -110,18 +149,46 @@ func ConvertTiddlersV2(ts []models.Tiddler) []models.RecordV2 {
 	recs := make([]models.RecordV2, 0, len(ts))
 
 	for _, t := range ts {
-		// Meta
-		created, _ := parseTWDate(t.Created)
-		modified, _ := parseTWDate(t.Modified)
+		// --- Extracción robusta de campos secundarios ---
+		created := t.Created
+		modified := t.Modified
+		color := t.Color
+		tmapid := t.TmapID
 
-		meta := models.Meta{
+		// Buscar en Meta si están vacíos
+		if t.Meta != nil {
+			if created == "" {
+				created = t.Meta.Created
+			}
+			if modified == "" {
+				modified = t.Meta.Modified
+			}
+			if color == "" {
+				color = t.Meta.Color
+			}
+			// Buscar en Meta.Extra
+			if t.Meta.Extra != nil {
+				if tmapid == "" {
+					tmapid = t.Meta.Extra["tmap.id"]
+				}
+				if color == "" {
+					color = t.Meta.Extra["color"]
+				}
+			}
+		}
+
+		// Meta
+		createdTime, _ := parseTWDate(created)
+		modifiedTime, _ := parseTWDate(modified)
+
+		meta := models.RecordMeta{
 			Title:    t.Title,
 			Tags:     parseTags(t.Tags),
-			Created:  created,
-			Modified: modified,
-			Color:    t.Color,
+			Created:  createdTime,
+			Modified: modifiedTime,
+			Color:    color,
 			Extra: map[string]string{
-				"tmap.id": t.TmapID,
+				"tmap.id": tmapid,
 			},
 		}
 
@@ -188,24 +255,70 @@ func ConvertTiddlersV3(ts []models.Tiddler) []map[string]any {
 			modifiedStr = formatISO8601(time.Now())
 		}
 
-		// 3) Extraer tags
+		// 3) Extraer tags y tags_list
 		tags := parseTags(t.Tags)
-
-		// 4) Construir el objeto JSON mínimo
-		obj := map[string]any{
-			"id":       t.Title,
-			"title":    t.Title,
-			"created":  createdStr,
-			"modified": modifiedStr,
-			"tags":     tags,
-			"tmap.id":  t.TmapID,
-			"type":     t.Type,
-			"text":     t.Text,
+		var tagsList []string
+		if t.TagsList != nil {
+			tagsList = t.TagsList
+		} else {
+			tagsList = []string{}
 		}
 
-		// 5) Si tu modelo Tiddler incluyera relaciones explícitas,
-		// podrías agregarlas así (aquí se deja como nil/simplemente no se incluye):
-		// obj["relations"] = map[string][]string{ ... }
+		// --- Extracción robusta de campos secundarios ---
+		created := t.Created
+		modified := t.Modified
+		color := t.Color
+		tmapid := t.TmapID
+		path := t.Path
+
+		// Buscar en Meta si están vacíos
+		if t.Meta != nil {
+			if created == "" {
+				created = t.Meta.Created
+			}
+			if modified == "" {
+				modified = t.Meta.Modified
+			}
+			if color == "" {
+				color = t.Meta.Color
+			}
+			// Buscar en Meta.Extra
+			if t.Meta.Extra != nil {
+				if tmapid == "" {
+					tmapid = t.Meta.Extra["tmap.id"]
+				}
+				if color == "" {
+					color = t.Meta.Extra["color"]
+				}
+				if path == "" {
+					path = t.Meta.Extra["path"]
+				}
+			}
+		}
+
+		// 4) Construir el objeto JSON mínimo y robusto
+		obj := map[string]any{
+			"id":           t.Title,
+			"title":        t.Title,
+			"created":      orEmpty(created),
+			"created_rfc":  createdStr,
+			"modified":     orEmpty(modified),
+			"modified_rfc": modifiedStr,
+			"tags":         tags,
+			"tags_list":    tagsList,
+			"tmap.id":      orEmpty(tmapid),
+			"type":         orEmpty(t.Type),
+			"text":         GetTextContent(t.Text),
+			"color":        orEmpty(color),
+			"path":         orEmpty(path),
+		}
+
+		// 5) Relaciones explícitas si aplica
+		if t.Relations != nil {
+			obj["relations"] = t.Relations
+		} else {
+			obj["relations"] = map[string]any{}
+		}
 
 		recs = append(recs, obj)
 	}
@@ -213,24 +326,56 @@ func ConvertTiddlersV3(ts []models.Tiddler) []map[string]any {
 }
 
 // ConvertTiddlersHybrid genera un slice de objetos planos ideales para IA/RAG.
-// Incluye campos raíz y bloques meta/content/relations planos, sin duplicados.
 func ConvertTiddlersHybrid(ts []models.Tiddler) []models.Record {
 	recs := make([]models.Record, 0, len(ts))
 	for _, t := range ts {
+		// --- Extracción robusta de campos secundarios ---
+		created := t.Created
+		modified := t.Modified
+		color := t.Color
+
+		// Buscar en Meta si están vacíos
+		if t.Meta != nil {
+			if created == "" {
+				created = t.Meta.Created
+			}
+			if modified == "" {
+				modified = t.Meta.Modified
+			}
+			if color == "" {
+				color = t.Meta.Color
+			}
+		}
+
 		rec := models.Record{
 			ID:           t.Title,
 			Tags:         parseTags(t.Tags),
 			ContentType:  t.Type,
-			TextMarkdown: t.Text,
-			TextPlain:    t.Text,
-			CreatedAt:    t.Created,
-			ModifiedAt:   t.Modified,
-			Color:        t.Color,
+			TextMarkdown: GetTextContent(t.Text),
+			TextPlain:    GetTextContent(t.Text),
+			CreatedAt:    created,
+			ModifiedAt:   modified,
+			Color:        color,
 		}
 		recs = append(recs, rec)
 	}
 	return recs
 }
 
-// ELIMINAR: La función ReverseJSONLToTiddlyJSON que estaba aquí
-// Ahora está en reverse.go como archivo separado
+// GetTextContent extrae el texto del contenido, manejando tanto JSON como texto plano
+func GetTextContent(text string) string {
+	if len(text) > 0 && text[0] == '{' && text[len(text)-1] == '}' {
+		var w map[string]any
+		if err := json.Unmarshal([]byte(text), &w); err == nil {
+			if c, ok := w["content"].(map[string]any); ok {
+				if plain, ok := c["plain"].(string); ok && plain != "" {
+					return plain
+				}
+				if markdown, ok := c["markdown"].(string); ok && markdown != "" {
+					return markdown
+				}
+			}
+		}
+	}
+	return text
+}

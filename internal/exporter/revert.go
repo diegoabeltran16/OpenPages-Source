@@ -3,8 +3,11 @@ package exporter
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"time"
@@ -71,66 +74,385 @@ type Tiddler struct {
 	TmapID   string `json:"tmap.id,omitempty"`
 }
 
-// FromJSONLToJSON convierte un archivo JSONL de tiddlers a un archivo JSON
-func FromJSONLToJSON(inFile, outFile string) error {
-	f, err := os.Open(inFile)
+// ExportAllFromJSONL exporta todos los tiddlers desde un archivo JSONL a un archivo de salida
+func ExportAllFromJSONL(jsonlPath, outPath string) error {
+	file, err := os.Open(jsonlPath)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer file.Close()
 
-	tiddlers := make(map[string]Tiddler)
-	scanner := bufio.NewScanner(f)
+	var resultArr []map[string]any
+	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		var obj map[string]interface{}
+		var obj map[string]any
 		if err := json.Unmarshal(scanner.Bytes(), &obj); err != nil {
+			log.Printf("invalid JSONL line: %v", err)
+			continue
+		}
+		title := getString(obj, "title")
+		if title == "" || title == "<nil>" {
 			continue
 		}
 
-		// Reconstruir tags en formato TiddlyWiki
-		tags := ""
+		// tags: array de strings (si es string, parsear)
+		var tagsArr []string
 		if arr, ok := obj["tags"].([]interface{}); ok {
 			for _, tag := range arr {
-				tags += "[[" + fmt.Sprint(tag) + "]] "
+				if s, ok := tag.(string); ok {
+					tagsArr = append(tagsArr, s)
+				}
 			}
-			tags = strings.TrimSpace(tags)
-		} else if str, ok := obj["tags"].(string); ok {
-			tags = str
+		} else if s, ok := obj["tags"].(string); ok {
+			tagsArr = parseTags(s)
+		} else {
+			tagsArr = []string{}
 		}
 
-		// Convertir fechas a formato TiddlyWiki (solo yyyyMMdd)
-		created := revertDate(getString(obj, "created"))
-		modified := revertDate(getString(obj, "modified"))
-
-		title := getString(obj, "title")
-		if title == "" {
-			title = getString(obj, "id")
+		// relations
+		relations := map[string]any{}
+		if v, ok := obj["relations"].(map[string]any); ok {
+			relations = v
 		}
 
-		tiddler := Tiddler{
-			Title:    title,
-			Text:     getString(obj, "text"),
-			Type:     getString(obj, "type"),
-			Tags:     tags,
-			Created:  created,
-			Modified: modified,
-			Color:    getString(obj, "color"),
-			TmapID:   getString(obj, "tmap.id"),
+		// tags_list: copiar tal cual si existe, si no, array vacío
+		var tagsList []string
+		if arr, ok := obj["tags_list"].([]interface{}); ok {
+			for _, tag := range arr {
+				if s, ok := tag.(string); ok {
+					tagsList = append(tagsList, s)
+				}
+			}
+		} else if arr, ok := obj["tags_list"].([]string); ok {
+			tagsList = arr
+		} else {
+			tagsList = []string{}
 		}
 
-		if tiddler.Title != "" {
-			tiddlers[tiddler.Title] = tiddler
+		// text: todo lo que no sea campo estándar, serializado como JSON (MOVER AQUÍ)
+		standardFields := map[string]bool{
+			"title": true, "type": true, "tags": true, "tags_list": true,
+			"hash": true, "path": true, "color": true, "tmap.id": true, "relations": true,
+			"created": true, "modified": true, "id": true, "created_rfc": true, "modified_rfc": true,
 		}
+		textMap := make(map[string]any)
+		for k, v := range obj {
+			if !standardFields[k] {
+				textMap[k] = v
+			}
+		}
+		textBytes, _ := json.Marshal(textMap)
+		text := string(textBytes)
+		if len(textMap) == 0 {
+			text = "{}"
+		}
+
+		// color, created, modified, path, tmap.id: siempre string ("" si no existe)
+		color := getString(obj, "color")
+		created := getString(obj, "created")
+		modified := getString(obj, "modified")
+		path := getString(obj, "path")
+		tmapid := getString(obj, "tmap.id")
+
+		// --- Poblar desde meta y extra si están vacíos ---
+		if meta, ok := obj["meta"].(map[string]interface{}); ok {
+			if color == "" {
+				color = getString(meta, "color")
+			}
+			if created == "" {
+				created = getString(meta, "created")
+			}
+			if modified == "" {
+				modified = getString(meta, "modified")
+			}
+			if tmapid == "" {
+				tmapid = getString(meta, "tmap.id")
+			}
+			if path == "" {
+				path = getString(meta, "path")
+			}
+			// Buscar en meta.extra
+			if extra, ok := meta["extra"].(map[string]interface{}); ok {
+				if tmapid == "" {
+					tmapid = getString(extra, "tmap.id")
+				}
+				if color == "" {
+					color = getString(extra, "color")
+				}
+				if path == "" {
+					path = getString(extra, "path")
+				}
+			}
+		}
+
+		// Si aún están vacíos, intentar extraer desde el campo "text" (JSON serializado)
+		if looksLikeJSON(text) {
+			var inner map[string]interface{}
+			if err := json.Unmarshal([]byte(text), &inner); err == nil {
+				if created == "" {
+					created = getString(inner, "created")
+				}
+				if modified == "" {
+					modified = getString(inner, "modified")
+				}
+				if color == "" {
+					color = getString(inner, "color")
+				}
+				if tmapid == "" {
+					tmapid = getString(inner, "tmap.id")
+				}
+				if path == "" {
+					path = getString(inner, "path")
+				}
+				// Buscar en inner.meta.extra
+				if meta, ok := inner["meta"].(map[string]interface{}); ok {
+					if color == "" {
+						color = getString(meta, "color")
+					}
+					if created == "" {
+						created = getString(meta, "created")
+					}
+					if modified == "" {
+						modified = getString(meta, "modified")
+					}
+					if tmapid == "" {
+						tmapid = getString(meta, "tmap.id")
+					}
+					if path == "" {
+						path = getString(meta, "path")
+					}
+					if extra, ok := meta["extra"].(map[string]interface{}); ok {
+						if tmapid == "" {
+							tmapid = getString(extra, "tmap.id")
+						}
+						if color == "" {
+							color = getString(extra, "color")
+						}
+						if path == "" {
+							path = getString(extra, "path")
+						}
+					}
+				}
+			}
+		}
+
+		// hash
+		hash := hashSHA256(text)
+
+		// Si tagsArr y tagsList están vacíos, intenta extraerlos desde meta.tags en el campo "text"
+		if len(tagsArr) == 0 && len(tagsList) == 0 && looksLikeJSON(text) {
+			var inner map[string]interface{}
+			if err := json.Unmarshal([]byte(text), &inner); err == nil {
+				// Buscar en inner["meta"]["tags"]
+				if meta, ok := inner["meta"].(map[string]interface{}); ok {
+					if tagsRaw, ok := meta["tags"]; ok {
+						switch tags := tagsRaw.(type) {
+						case []interface{}:
+							for _, tag := range tags {
+								if s, ok := tag.(string); ok {
+									tagsArr = append(tagsArr, s)
+									tagsList = append(tagsList, s)
+								}
+							}
+						case []string:
+							tagsArr = append(tagsArr, tags...)
+							tagsList = append(tagsList, tags...)
+						}
+					}
+				}
+			}
+		}
+
+		// --- Unificación y sincronización final de tags ---
+		if len(tagsArr) == 0 && len(tagsList) > 0 {
+			tagsArr = append(tagsArr, tagsList...)
+		}
+		if len(tagsList) == 0 && len(tagsArr) > 0 {
+			// (No action needed: tagsList is set to uniqueTags below)
+		}
+		// Eliminar duplicados y mantener orden
+		tagsSeen := make(map[string]struct{})
+		uniqueTags := make([]string, 0, len(tagsArr))
+		for _, tag := range tagsArr {
+			if _, ok := tagsSeen[tag]; !ok {
+				tagsSeen[tag] = struct{}{}
+				uniqueTags = append(uniqueTags, tag)
+			}
+		}
+		tagsArr = uniqueTags
+		tagsList = uniqueTags
+
+		// Construir tagsTW usando helper
+		tagsTW := buildTagsTW(tagsList, tagsArr)
+
+		tiddler := map[string]any{
+			"title":     title,
+			"text":      text,
+			"type":      "application/json",
+			"tags":      tagsTW,   // <-- string TiddlyWiki
+			"tags_list": tagsList, // <-- array
+			"created":   created,
+			"modified":  modified,
+			"hash":      hash,
+			"path":      path,
+			"color":     color,
+			"tmap.id":   tmapid,
+			"relations": relations,
+		}
+		resultArr = append(resultArr, tiddler)
 	}
 
-	out, err := os.Create(outFile)
+	// Verificar errores del scanner
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+
+	out, err := os.Create(outPath)
 	if err != nil {
 		return err
 	}
 	defer out.Close()
 	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")
-	return enc.Encode(tiddlers)
+	return enc.Encode(resultArr)
+}
+
+// buildTagsTW construye el string TiddlyWiki de tags
+func buildTagsTW(tagsList, tagsArr []string) string {
+	var tagsTW string
+	// Usar la lista más larga y no vacía
+	var tags []string
+	if len(tagsList) > 0 {
+		tags = tagsList
+	} else {
+		tags = tagsArr
+	}
+	for _, tag := range tags {
+		trimmed := strings.TrimSpace(tag)
+		if trimmed == "" {
+			continue
+		}
+		// Siempre envolver en [[...]] si no lo está
+		if !strings.HasPrefix(trimmed, "[[") || !strings.HasSuffix(trimmed, "]]") {
+			tagsTW += "[[" + trimmed + "]] "
+		} else {
+			tagsTW += trimmed + " "
+		}
+	}
+	return strings.TrimSpace(tagsTW)
+}
+
+// CloneAndUpdateTexts es la función principal de revertido 100% robusta
+func CloneAndUpdateTexts(plantillaPath, jsonlPath, outPath string) error {
+	// 1. Leer la plantilla como array
+	plantillaFile, err := os.Open(plantillaPath)
+	if err != nil {
+		return fmt.Errorf("abrir plantilla %s: %w", plantillaPath, err)
+	}
+	defer plantillaFile.Close()
+
+	var plantillaArr []Tiddler
+	if err := json.NewDecoder(plantillaFile).Decode(&plantillaArr); err != nil {
+		return fmt.Errorf("decodificar plantilla: %w", err)
+	}
+
+	// 2. Leer los textos nuevos desde JSONL con máxima robustez
+	updates := make(map[string]string)
+	jsonlFile, err := os.Open(jsonlPath)
+	if err != nil {
+		return fmt.Errorf("abrir JSONL %s: %w", jsonlPath, err)
+	}
+	defer jsonlFile.Close()
+
+	scanner := bufio.NewScanner(jsonlFile)
+	for scanner.Scan() {
+		var obj map[string]interface{}
+		if err := json.Unmarshal(scanner.Bytes(), &obj); err != nil {
+			log.Printf("invalid JSONL line: %v", err)
+			continue
+		}
+
+		title := getString(obj, "title")
+		if title == "" {
+			title = getString(obj, "id")
+		}
+		if title == "" || title == "<nil>" {
+			continue
+		}
+
+		text := ExtractTextFromJSONL(obj)
+		if text != "" && !looksLikeJSON(text) {
+			updates[title] = text
+		}
+	}
+
+	// Verificar errores del scanner
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+
+	// 3. Actualizar los textos en la plantilla preservando estructura
+	now := time.Now().Format("20060102150405")
+	var resultArr []Tiddler
+	applied := 0 // Contador de actualizaciones aplicadas
+
+	for _, t := range plantillaArr {
+		if t.Title == "" || t.Title == "<nil>" {
+			continue
+		}
+
+		if t.Text == "" && t.Type == "" && t.Tags == "" &&
+			t.Created == "" && t.Modified == "" && t.Color == "" && t.TmapID != "" {
+			continue
+		}
+
+		if strings.HasSuffix(t.Title, ".json") || strings.HasSuffix(t.Title, ".jsonl") {
+			continue
+		}
+
+		if newText, hasUpdate := updates[t.Title]; hasUpdate {
+			needsUpdate := false
+			if looksLikeJSON(t.Text) {
+				var wrapper map[string]interface{}
+				if err := json.Unmarshal([]byte(t.Text), &wrapper); err == nil {
+					if content, ok := wrapper["content"].(map[string]interface{}); ok {
+						if currentPlain := getString(content, "plain"); currentPlain != newText {
+							needsUpdate = true
+						}
+					} else {
+						needsUpdate = true
+					}
+				}
+			} else {
+				needsUpdate = (t.Text != newText)
+			}
+
+			if needsUpdate {
+				t = UpdateTiddlerWrapper(t, newText, "")
+				t.Modified = now
+				applied++
+			}
+		}
+
+		resultArr = append(resultArr, t)
+	}
+
+	// 4. Guardar el resultado como array con formato bonito
+	out, err := os.Create(outPath)
+	if err != nil {
+		return fmt.Errorf("crear archivo salida %s: %w", outPath, err)
+	}
+	defer out.Close()
+
+	enc := json.NewEncoder(out)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(resultArr); err != nil {
+		return fmt.Errorf("codificar resultado: %w", err)
+	}
+
+	fmt.Printf("✅ Revertido completado: %d tiddlers procesados, %d actualizaciones aplicadas\n",
+		len(resultArr), applied)
+	return nil
 }
 
 // getString devuelve el valor string del campo o "" si es nil o no existe
@@ -138,7 +460,6 @@ func getString(obj map[string]interface{}, key string) string {
 	if v, ok := obj[key]; ok && v != nil {
 		return fmt.Sprint(v)
 	}
-	// Mapeo alternativo para campos comunes
 	switch key {
 	case "title":
 		if v, ok := obj["id"]; ok && v != nil {
@@ -152,91 +473,151 @@ func getString(obj map[string]interface{}, key string) string {
 	return ""
 }
 
-// revertDate convierte "2025-06-05T15:10:00-05:00" → "20250605"
-func revertDate(iso string) string {
-	t, err := time.Parse("2006-01-02T15:04:05-07:00", iso)
-	if err != nil {
-		return ""
-	}
-	return t.Format("20060102")
-}
+// ExtractTextFromJSONL extrae el texto plano desde un objeto JSONL con máxima robustez
+func ExtractTextFromJSONL(obj map[string]interface{}) string {
+	var text string
 
-func CloneAndUpdateTexts(plantillaPath, jsonlPath, outPath string) error {
-	// 1. Leer la plantilla como array
-	plantillaFile, err := os.Open(plantillaPath)
-	if err != nil {
-		return err
-	}
-	defer plantillaFile.Close()
-	var plantillaArr []Tiddler
-	if err := json.NewDecoder(plantillaFile).Decode(&plantillaArr); err != nil {
-		return err
+	text = getString(obj, "textPlain")
+	if text != "" {
+		return text
 	}
 
-	// Convertir array a objeto por título
-	plantilla := make(map[string]Tiddler)
-	for _, t := range plantillaArr {
-		plantilla[t.Title] = t
+	text = getString(obj, "contentPlain")
+	if text != "" {
+		return text
 	}
 
-	// 2. Leer los textos nuevos desde JSONL
-	updates := make(map[string]string)
-	jsonlFile, err := os.Open(jsonlPath)
-	if err != nil {
-		return err
-	}
-	defer jsonlFile.Close()
-	scanner := bufio.NewScanner(jsonlFile)
-	for scanner.Scan() {
-		var obj map[string]interface{}
-		if err := json.Unmarshal(scanner.Bytes(), &obj); err != nil {
-			continue
-		}
-		title := getString(obj, "title")
-		if title == "" {
-			title = getString(obj, "id")
-		}
-		text := getString(obj, "text")
+	if content, ok := obj["content"].(map[string]interface{}); ok {
+		text = getString(content, "plain")
 		if text != "" {
-			// Si el campo "text" en JSONL es un objeto, conviértelo a string plano
-			if isJSONString(text) {
-				// Si es un JSON serializado, puedes extraer el campo "plain" si existe
-				var temp map[string]interface{}
-				if err := json.Unmarshal([]byte(text), &temp); err == nil {
-					if plain, ok := temp["plain"].(string); ok {
-						text = plain
+			return text
+		}
+		text = getString(content, "contentPlain")
+		if text != "" {
+			return text
+		}
+	}
+
+	text = getString(obj, "textMarkdown")
+	if text != "" {
+		return text
+	}
+
+	text = getString(obj, "contentMarkdown")
+	if text != "" {
+		return text
+	}
+
+	if content, ok := obj["content"].(map[string]interface{}); ok {
+		text = getString(content, "markdown")
+		if text != "" {
+			return text
+		}
+		text = getString(content, "contentMarkdown")
+		if text != "" {
+			return text
+		}
+	}
+
+	if rawText, ok := obj["text"]; ok {
+		if s, ok := rawText.(string); ok {
+			if looksLikeJSON(s) {
+				var inner map[string]interface{}
+				if err := json.Unmarshal([]byte(s), &inner); err == nil {
+					text = getString(inner, "plain")
+					if text != "" {
+						return text
+					}
+					text = getString(inner, "contentPlain")
+					if text != "" {
+						return text
+					}
+					text = getString(inner, "markdown")
+					if text != "" {
+						return text
+					}
+					text = getString(inner, "contentMarkdown")
+					if text != "" {
+						return text
 					}
 				}
+			} else {
+				return s
 			}
-			updates[title] = text
 		}
 	}
 
-	// 3. Actualizar los textos en la plantilla
-	for k, t := range plantilla {
-		if newText, ok := updates[k]; ok {
-			t.Text = newText
-			plantilla[k] = t
-		}
+	return ""
+}
+
+// UpdateTiddlerWrapper actualiza el wrapper JSON de un tiddler manteniendo la estructura original
+func UpdateTiddlerWrapper(original Tiddler, newPlain, newMarkdown string) Tiddler {
+	if !looksLikeJSON(original.Text) {
+		original.Text = newPlain
+		return original
 	}
 
-	// 4. Guardar el resultado como array
-	var resultArr []Tiddler
-	for _, t := range plantilla {
-		resultArr = append(resultArr, t)
+	var wrapper map[string]interface{}
+	if err := json.Unmarshal([]byte(original.Text), &wrapper); err != nil {
+		original.Text = newPlain
+		return original
 	}
 
-	out, err := os.Create(outPath)
+	content, ok := wrapper["content"].(map[string]interface{})
+	if !ok {
+		content = make(map[string]interface{})
+	}
+
+	if newPlain != "" {
+		content["plain"] = newPlain
+	}
+	if newMarkdown != "" {
+		content["markdown"] = newMarkdown
+	}
+
+	if newPlain == "" && content["plain"] != nil {
+		// Mantener el plain existente
+	}
+	if newMarkdown == "" && content["markdown"] != nil {
+		// Mantener el markdown existente
+	}
+
+	wrapper["content"] = content
+
+	b, err := json.MarshalIndent(wrapper, "", "  ")
 	if err != nil {
-		return err
+		original.Text = newPlain
+		return original
 	}
-	defer out.Close()
-	enc := json.NewEncoder(out)
-	enc.SetIndent("", "  ")
-	return enc.Encode(resultArr)
+
+	original.Text = string(b)
+	return original
 }
 
-// isJSONString verifica si una cadena es un JSON válido
-func isJSONString(s string) bool {
-	return strings.HasPrefix(s, "{") && strings.HasSuffix(s, "}")
+// parseTags extrae etiquetas [[tag]] como array de strings
+func parseTags(raw string) []string {
+	var tags []string
+	parts := strings.Fields(raw)
+	for _, p := range parts {
+		if strings.HasPrefix(p, "[[") && strings.HasSuffix(p, "]]") {
+			tag := strings.TrimPrefix(p, "[[")
+			tag = strings.TrimSuffix(tag, "]]")
+			tags = append(tags, tag)
+		}
+	}
+	return tags
 }
+
+// hashSHA256 calcula el hash SHA-256 de un string y lo devuelve en hex
+func hashSHA256(s string) string {
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:])
+}
+
+// looksLikeJSON detecta si un string parece ser un objeto o array JSON serializado
+func looksLikeJSON(s string) bool {
+	s = strings.TrimSpace(s)
+	return len(s) > 1 && (s[0] == '{' || s[0] == '[')
+}
+
+// (Eliminado: lógica de sincronización de tags fuera de función, lo cual no es válido en Go)

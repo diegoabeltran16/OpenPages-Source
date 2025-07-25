@@ -189,4 +189,6 @@ data/
 # Ignorar binario o carpeta de build
 rep_export_Windows/
 
+go.sum
 
+CI_CD_docs

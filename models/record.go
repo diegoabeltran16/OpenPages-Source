@@ -51,7 +51,7 @@ type Section struct {
 	RawValue string `json:"value"`
 }
 
-type Meta struct {
+type RecordMeta struct {
 	Title    string            `json:"title"`
 	Tags     []string          `json:"tags,omitempty"`
 	Created  time.Time         `json:"created,omitempty"`
@@ -63,7 +63,7 @@ type Meta struct {
 type RecordV2 struct {
 	ID        string              `json:"id"`
 	Type      string              `json:"type"` // "tiddler", "fragment", etc.
-	Meta      Meta                `json:"meta"`
+	Meta      RecordMeta          `json:"meta"`
 	Content   Content             `json:"content"`
 	Relations map[string][]string `json:"relations,omitempty"`
 }

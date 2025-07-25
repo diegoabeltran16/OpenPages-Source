@@ -35,9 +35,37 @@ func ExportToJSONL(tiddlers []Tiddler, outPath string) error {
 	defer f.Close()
 	enc := json.NewEncoder(f)
 	for _, t := range tiddlers {
-		if err := enc.Encode(t); err != nil {
+		// Crea un objeto plano para exportar
+		exportObj := map[string]any{
+			"title":     t.Title,
+			"type":      t.Type,
+			"tags":      t.Tags,
+			"created":   t.Created,
+			"modified":  t.Modified,
+			"color":     t.Color,
+			"tmap.id":   t.TmapID,
+			"textPlain": GetTextContent(t.Text),
+		}
+		if err := enc.Encode(exportObj); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func GetTextContent(text string) string {
+	if len(text) > 0 && text[0] == '{' && text[len(text)-1] == '}' {
+		var w map[string]any
+		if err := json.Unmarshal([]byte(text), &w); err == nil {
+			if c, ok := w["content"].(map[string]any); ok {
+				if plain, ok := c["plain"].(string); ok && plain != "" {
+					return plain
+				}
+				if markdown, ok := c["markdown"].(string); ok && markdown != "" {
+					return markdown
+				}
+			}
+		}
+	}
+	return text
 }
